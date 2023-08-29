@@ -1,3 +1,6 @@
 
 *.npy
 *.DS_Store
+data/.DS_Store
+data/models/.DS_Store
+data/training-trajectories/.DS_Store
