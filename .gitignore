@@ -4,3 +4,8 @@
 data/.DS_Store
 data/models/.DS_Store
 data/training-trajectories/.DS_Store
+*.zip
+data/results_cache/bayesian_estimation/.DS_Store
+data/results_cache/bayesian_estimation/.DS_Store
+*.h5
+*.hdf5
