@@ -1,0 +1,24 @@
+name: ParamEst-NN-Env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - tensorflow
+  - matplotlib
+  - numpy
+  - jupyter
+  - qutip
+  - pandas
+  - tqdm
+  - scipy
+  - scikit-learn
+  - black
+  - seaborn
+  - pip
+  - pip:
+    - cython==0.29.36
+    - sbi
+    - fire
+    - ultranest
+
+prefix: /Users/carlos/miniforge3/envs/ParameterInference
