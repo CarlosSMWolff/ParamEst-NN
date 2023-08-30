@@ -9,3 +9,4 @@ data/results_cache/bayesian_estimation/.DS_Store
 data/results_cache/bayesian_estimation/.DS_Store
 *.h5
 *.hdf5
+*.csv
