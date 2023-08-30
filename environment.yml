@@ -20,5 +20,3 @@ dependencies:
     - sbi
     - fire
     - ultranest
-
-prefix: /Users/carlos/miniforge3/envs/ParameterInference

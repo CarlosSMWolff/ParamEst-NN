@@ -6,7 +6,7 @@
 Parameter estimation via deep learning of quantum correlations in continuous photon counting measurements.
 This repository contains [Jupyter](https://jupyter.org/) notebooks with the codes necessary to reproduce the results in <a href = "https://arxiv.org/abs/" target="_blank"> this paper</a>. 
 
-<p align="center"><img src="src/fig1.png"  align=middle width=600pt />
+<p align="center"><img src="notebooks/figures/fig1.png"  align=middle width=600pt />
 </p>
 
 Figure 1: Quantum parameter estimation strategies in open quantum systems. Parameters are encoded in the dynamics of an open quantum system: here, the frequency detuning $\Delta = \omega_q-\omega_L$ and amplitude $\Omega$ of an electromagnetic field driving a qubit. The quantum light radiated by the emitter is detected and the photodetection times recorded. The unknown parameters can be reconstructed by application through Bayesian parameter estimation. An alternative approach is based on the use of Neural Networks.
@@ -18,10 +18,25 @@ Figure 1: Quantum parameter estimation strategies in open quantum systems. Param
 
 - Clone this directory
 - cd to the current folder `cd ParamEst-NN`
-- If needed, install the [`conda`](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html) environment manager for Python.
-- Create a new environment for this project: ```bash conda env create -f environment.yml```. This will install a new Python environment with the dependencies needed to run the scripts and notebooks of this repository.
-- Check that the environment exists, ```bash conda env list``` .
-- Activate the environment  ```bash conda activate ParamEst-NN-Env```.
+- Install the `paramest_nn` as an editable python package with its dependencies
+```
+pip install -e .
+```
+
+In Windows you might need to use a package manager such as Anaconda before
+installing the `paramest_nn` package. You may want to create an environment
+and then install `paramest_nn` simply with:
+
+```
+pip install -e .
+``` 
+
+The details to install conda or a lightweight version called miniconda can be
+found below:
+
+- [`conda`](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html)
+- [`miniconda`](https://docs.conda.io/en/latest/miniconda.html)
+
 
 ### Populating the ```data``` folder
 
