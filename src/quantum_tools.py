@@ -736,12 +736,12 @@ def create_directory(filepath:str):
 
     Returns:
     -----------
-    (int): 1 if directory was created, 0 if already existing.
+    None
+    
     """
 
     if not os.path.exists(filepath):
         print(f"Directory {filepath} not found: creating...")
         os.makedirs(filepath)
-        return 1
     else:
-        return 0
+        print("Folder already exists.")
