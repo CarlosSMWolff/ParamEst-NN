@@ -27,6 +27,7 @@ Functions:
     - compute_population_ss: Calculate the steady-state population of a coherently driven two-level system based on Omega and Delta.
     - compute_likelihood: Computes (using Qutip) the likelihood function L(D|Delta) given the model parameter Delta.
     - compute_negative_log_likelihood: Returns the negative log-likelihood function -log[L(D|Delta)].
+    - create_directory: Looks for a directory, creates it if it is not found.
 
 """
 
@@ -38,6 +39,7 @@ from scipy import stats
 from scipy.linalg import expm
 from scipy.stats import norm
 from time import time
+import os
 
 from numpy import exp, cos, cosh, sqrt
 
@@ -723,3 +725,23 @@ def compute_negative_log_likelihood(Delta: float, data: np.array, r: float = 5.0
     """
 
     return -np.log(compute_likelihood(Delta, data, r, gamma, omega)+1e-300)
+
+def create_directory(filepath:str):
+    """
+    Looks for a directory, creates it if it is not found.
+
+    Parameters:
+    -----------
+    filepath (str): Path of the directory
+
+    Returns:
+    -----------
+    (int): 1 if directory was created, 0 if already existing.
+    """
+
+    if not os.path.exists(filepath):
+        print(f"Directory {filepath} not found: creating...")
+        os.makedirs(filepath)
+        return 1
+    else:
+        return 0
