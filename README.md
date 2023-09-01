@@ -1,5 +1,4 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.X.svg)](https://www.dropbox.com/scl/fi/mkbs1kvn06mvsd5k5v0z9/data.zip?rlkey=k6otygqljpv9aj3bkjp0pjey3&dl=0)
-
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8305509.svg)](https://www.dropbox.com/scl/fi/mkbs1kvn06mvsd5k5v0z9/data.zip?rlkey=k6otygqljpv9aj3bkjp0pjey3&dl=0)
 
 # Parameter Estimation from Photon Counting data with Neural Networks
 
@@ -34,7 +33,7 @@ These folders have to be populated by running the following notebooks in order:
 
 
 Alternatively, you can download a ```data``` folder populated with the data used in <a href = "https://arxiv.org/abs/" target="_blank"> the paper</a>
-from Zenodo at [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.X.svg)](https://www.dropbox.com/scl/fi/mkbs1kvn06mvsd5k5v0z9/data.zip?rlkey=k6otygqljpv9aj3bkjp0pjey3&dl=0).
+from Zenodo at [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8305509.svg)](https://www.dropbox.com/scl/fi/mkbs1kvn06mvsd5k5v0z9/data.zip?rlkey=k6otygqljpv9aj3bkjp0pjey3&dl=0).
 
 ### Running codes in Google Colaboratory
 
