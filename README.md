@@ -62,23 +62,21 @@ These folders have to be populated by running the following notebooks in order:
 
 ### Running codes in Google Colaboratory
 
-The notebooks are ready to be used in Google Colaboratory, which can be done by pressing ![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg) at the top of each notebook.  
+The notebooks are ready to be used in Google Colaboratory, which can be done by pressing ![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg) at the top of each notebook.  When running in Colab, data will be downloaded automatically. 
 
-**Remark**: The notebook [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/2-Training.ipynb) is set up to take advantage from Google Colaboratory's TPUs. This is the fastest option for training the models, and it is recommended for readers with access to a Colab Pro account.
-
-Since notebooks [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/2-Training.ipynb) and [3-Results.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/3-Results.ipynb) required populated `data` folders, these notebooks will download a compressed `data` folder from Zenodo when running in Google Colab. The download link can be changed to any suitable link to a compressed `data.zip` file containing the populated `data` folder. We recommend re-uploading the downloaded datafolder from Zenodo, or your own data folder, into [Dropbox](https://www.dropbox.com), and then using your own Dropbox link in these notebooks. This ensures faster download speeds when using Google Colaboratory.
+**Remark**: The notebook [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/2-Training.ipynb) is set up to take advantage from Google Colaboratory's TPUs. This is the fastest option for training the models, and it is recommended for readers with access to a Colab Pro account.
 
 
 ## Notebooks
 (Currently tested on TensorFlow 2.12.1)
 
-### [1-Trajectories_generation.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/1-Trajectories_generation.ipynb)
+### [1-Trajectories_generation.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/1-Trajectories_generation.ipynb)
 Generates quantum trajectories for training and validating the neural networks.
 
-### [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/2-Training.ipynb)
+### [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/2-Training.ipynb)
 Trains neural networks for the problem of quantum parameter estimation.
 
-### [3-Results.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/3-Results.ipynb)
+### [3-Results.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/3-Results.ipynb)
 Reproduces the main figures shown in the manuscript, assessing the performance of the trained models.
 
 ## Contact  
@@ -93,7 +91,7 @@ Feel free to contact me to discuss any issues, questions or comments.
 @misc{ParamEstNN,
 title={},
 url={https://github.com/CarlosSMWolff/ParamEst-NN},
-note={GitHub repository containing deep learning approach generating fundamental and excited eigenfunctions for molecular potentials.},
+note={GitHub repository containing deep learning approach for quantum parameter estimation with photon counting data.},
 author={Enrico Rinaldi, Carlos Sánchez Muñoz},
   year={2023}
 }
