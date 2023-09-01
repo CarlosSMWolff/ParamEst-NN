@@ -40,7 +40,7 @@ found below:
 At the beginning of each notebook, the path to a directory where data is loaded and written is set as the variable `datapath`. 
 
 #### Option #1: Download the data
-You can download the necessary content of the ```[datapath]/``` folder populated to reproduce our results in <a href = "https://arxiv.org/abs/" target="_blank"> the paper</a>
+You can download the necessary content of the ```[datapath]/``` folder in order to reproduce our results in <a href = "https://arxiv.org/abs/" target="_blank"> the paper</a>
 from Zenodo at [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8305509.svg)](https://www.dropbox.com/scl/fi/mkbs1kvn06mvsd5k5v0z9/data.zip?rlkey=k6otygqljpv9aj3bkjp0pjey3&dl=0).
 
 Alternatively, you can directly run the notebooks setting the variable 
