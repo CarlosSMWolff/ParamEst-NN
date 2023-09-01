@@ -1,5 +1,5 @@
 """
-Script to generate the posterior estimates for trajectories saved on file 
+Script to generate the posterior estimates for trajectories saved on file
 generated with a fixed delta
 Based on ultranest and with a 2D parameter space
 The prior is uniform
@@ -28,47 +28,31 @@ omega_min = 0.25
 omega_max = 5.0
 # number of trajectories to use for each parameter set
 num_trajs = 1
-## TLS parameters
+# TLS parameters
 gamma = 1.0
 # Trajectories info
 njumps = 48
-# path
-trajs_name = "data/training-trajectories/2D-delta-omega/taus-2D.npy"
-params_name = (
-    "data/training-trajectories/2D-delta-omega/param_rand_list-2D.npy"
-)
+# path to downloaded data and parameters
+path_param = "data/validation-trajectories/2D-delta-omega/validation-deltas-2D-delta-omega-nsets-10000.npy"
+path_tau = "data/validation-trajectories/2D-delta-omega/validation-trajectories-2D-delta-omega-nsets-10000.npy"
 
 
 #############
-## GET DATA #
+#  GET DATA #
 #############
-def to_time_delay_matrix(data: np.array) -> np.array:
-    """This function takes a 2D array with the times of the jumps for many trajectories and transforms it into a 2D array of time delays between jumps for each trajectory
-
-    Args:
-        data (np.array): The 2D array with the times of each jump
-
-    Returns:
-        np.array: The 2D array with the time delays between jumps
-    """
-    assert len(data.shape) == 2, "Must be a 2D array"
-    assert data.shape[1] == njumps, f"Number of jumps does not correspond to {njumps}"
-    return np.concatenate(
-        (np.reshape(data[:, 0], (data.shape[0], 1)), np.diff(data)), axis=1
-    )
-
-
 def get_traj_and_delta(
     filenametraj: str, filenamedelta: str
 ) -> Tuple[np.array, np.array]:
-    """Get the arrays containing all trajectories and all delta values for validation.
+    """Get the arrays containing all trajectories and all
+    parameters (delta,omega) values for validation.
 
     Args:
         filenametraj (str): The file name for the trajectories
         filenamedelta (str): The filename for the deltas
 
     Returns:
-        tuple(np.array, np.array): A tuple of 2 arrays (traj, delta); the trajectories first and the deltas second
+        tuple(np.array, np.array): A tuple of 2 arrays (traj, delta);
+        the trajectories first and the deltas second
     """
     ft = Path(filenametraj)
     fd = Path(filenamedelta)
@@ -78,10 +62,11 @@ def get_traj_and_delta(
 
 
 ######################
-## DEFINE LIKELIHOOD #
+#  DEFINE LIKELIHOOD #
 ######################
 def single_click_probability(params: np.ndarray, tau: float) -> float:
-    """The probability to observe a click after some time tau for a 2-level system
+    """The probability to observe a click after some time tau
+       for a 2-level system
 
     Args:
         params (np.ndarray): The array of parameters for the Hamiltonian (2D)
@@ -126,14 +111,17 @@ def single_click_probability(params: np.ndarray, tau: float) -> float:
 
 
 def log_likelihood(params: np.ndarray, data: np.ndarray) -> np.ndarray:
-    """Likelihood function that will tell us how probable the data is given our model with parameters delta and omega.
+    """Likelihood function that will tell us how probable the data is
+       given our model with parameters delta and omega.
 
     Args:
-        params (np.ndarray): The parameter of the system. In our case this is a 2D array representing the detuning and frequency
+        params (np.ndarray): The parameter of the system.
+        In our case this is a 2D array representing the detuning and frequency
         data (np.ndarray): The trajectory data of the time delays
 
     Returns:
-        np.ndarray: The likelihood function for each observation (we compute it after each jump)
+        np.ndarray: The likelihood function for each observation
+        (we compute it after each jump (click))
     """
     prob_list = np.asarray([single_click_probability(params, tau) for tau in data])
     log_likelihood = np.sum(np.log(prob_list)) + 1e-300
@@ -142,7 +130,7 @@ def log_likelihood(params: np.ndarray, data: np.ndarray) -> np.ndarray:
 
 
 ##################
-## PRIOR UNIFORM #
+# UNIFORM PRIOR  #
 ##################
 def prior_transform_uniform(cube):
     # the argument, cube, consists of values from 0 to 1
@@ -158,14 +146,22 @@ def prior_transform_uniform(cube):
 
 
 #############
-## MAIN     #
+#  MAIN     #
 #############
-def main(params_id: int):
-    results_name = f"uniform_2d_{params_id}.csv"
-    trajs, params = get_traj_and_delta(trajs_name, params_name)
+def main(params_id: int) -> None:
+    """Main function running inference with UltraNest on a 2D parameter space
+    with data selected from validation trajectories
+    for a fixed pair of parameters (delta,omega)
+
+    Args:
+        params_id (int): The index corresponding to a pair of parameters (delta,omega)
+        from a grid. The full grid is saved on a file.
+    """
+    # get data from downloaded files
+    trajs, params = get_traj_and_delta(path_tau, path_param)
     # extract trajectories for validation
     param = params[params_id]
-    validation_trajs = to_time_delay_matrix(trajs[params_id])[:num_trajs]
+    validation_trajs = trajs[params_id][:num_trajs]
     print(f"Running for (delta,omega)={param}")
     print(f"Doing validation over a set of {num_trajs} trajectories of {njumps} jumps.")
     post = pd.DataFrame()
@@ -180,21 +176,24 @@ def main(params_id: int):
             viz_callback=False,
             show_status=False,
         )
-        # sampler.print_results()  # print to standard output
+        # Save posterior and ML to dataframe
         df = pd.DataFrame(results["posterior"] | results["maximum_likelihood"])
+        # add columns for the trajectory number and the name of parameters
         df["traj_id"] = traj_id
         df["params"] = parameters
         post = pd.concat([post, df], ignore_index=True)
-    # add delta as a column in the dataframe
+    # add delta and omega as columns in the dataframe
     post["Delta"] = param[0]
     post["Omega"] = param[1]
     # remove non-informative columns
     post.drop(
-        columns=["logl", "information_gain_bits", "point_untransformed"],
-        inplace=True
+        columns=["logl", "information_gain_bits", "point_untransformed"], inplace=True
     )
+    # name of the results file
+    results_name = f"uniform_2d_{params_id}.csv"
     # save to file
     post.to_csv(results_name, index=False)
+    return
 
 
 if __name__ == "__main__":
