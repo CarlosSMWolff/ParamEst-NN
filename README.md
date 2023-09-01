@@ -53,8 +53,8 @@ and the data will be downloaded automatically.
 By running the notebooks in this repository, the ```[datapath]/``` folder is populated with training and validation datasets, trained models, and cached results.
 These folders have to be populated by running the following notebooks in order:
 * [1-Trajectories_generation.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/1-Trajectories_generation.ipynb) (populates `[datapath]/training-trajectories` and `[datapath]/validation-trajectories`)
-* [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/2-Training.ipynb) (populates `data\models`, requires populated `[datapath]/training-trajectories`).
-* [3-Results.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/3-Results.ipynb) (populates `data\results-cache`, requires populated `[datapath]/validation-trajectories` and 
+* [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/2-Training.ipynb) (populates `[datapath]/models`, requires populated `[datapath]/training-trajectories`).
+* [3-Results.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/3-Results.ipynb) (populates `[datapath]/results-cache`, requires populated `[datapath]/validation-trajectories` and 
 `[datapath]/models`)
 
 ##### Instructions for 2D Ultranest: TO DO
