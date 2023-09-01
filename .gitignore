@@ -11,3 +11,6 @@ data/results_cache/bayesian_estimation/.DS_Store
 *.hdf5
 *.csv
 *.pyc
+paramest_nn.egg-info
+*.pdf
+*.tflite
