@@ -17,10 +17,24 @@ Figure 1: Quantum parameter estimation strategies in open quantum systems. Param
 
 - Clone this directory
 - cd to the current folder `cd ParamEst-NN`
-- If needed, install the [`conda`](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html) environment manager for Python.
-- Create a new environment for this project: ```bash conda env create -f environment.yml```. This will install a new Python environment with the dependencies needed to run the scripts and notebooks of this repository.
-- Check that the environment exists, ```bash conda env list``` .
-- Activate the environment  ```bash conda activate ParamEst-NN-Env```.
+- (Recommended) Create a new Python environment and activate it. For instance, using conda, you can create and activate an environment with name `paramest`, using Python 3.9, as
+```
+conda create -n paramest python=3.9
+conda activate paramest
+```
+- Install the `paramest_nn` as an editable python package with its dependencies
+```
+pip install -e .
+```
+
+In Windows you might need to use a package manager such as Anaconda before
+installing the `paramest_nn` package. 
+
+The details to install conda or a lightweight version called miniconda can be
+found below:
+
+- [`conda`](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html)
+- [`miniconda`](https://docs.conda.io/en/latest/miniconda.html)
 
 ### Populating the ```data``` folder
 
