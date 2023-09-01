@@ -36,18 +36,29 @@ found below:
 - [`conda`](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html)
 - [`miniconda`](https://docs.conda.io/en/latest/miniconda.html)
 
-### Populating the ```data``` folder
+### Populating the ```[datapath]``` folder
+At the beginning of each notebook, the path to a directory where data is loaded and written is set as the variable `datapath`. 
 
-By running the notebooks in this repository, the ```data``` folder is populated with training and validation datasets, trained models, and cached results.
-These folders have to be populated by running the following notebooks in order:
-* [1-Trajectories_generation.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/1-Trajectories_generation.ipynb) (populates `data\training-trajectories` and `data\validation-trajectories`)
-* [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/2-Training.ipynb) (populates `data\models`, requires populated `data\training-trajectories`).
-* [3-Results.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/3-Results.ipynb) (populates `data\results-cache`, requires populated `data\validation-trajectories` and 
-`data\models`)
-
-
-Alternatively, you can download a ```data``` folder populated with the data used in <a href = "https://arxiv.org/abs/" target="_blank"> the paper</a>
+#### Option #1: Download the data
+You can download the necessary content of the ```[datapath]/``` folder populated to reproduce our results in <a href = "https://arxiv.org/abs/" target="_blank"> the paper</a>
 from Zenodo at [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8305509.svg)](https://www.dropbox.com/scl/fi/mkbs1kvn06mvsd5k5v0z9/data.zip?rlkey=k6otygqljpv9aj3bkjp0pjey3&dl=0).
+
+Alternatively, you can directly run the notebooks setting the variable 
+```python
+download_required = True
+```
+and the data will be downloaded automatically. 
+
+#### Option #2: Populate the folder with your own computations
+By running the notebooks in this repository, the ```[datapath]/``` folder is populated with training and validation datasets, trained models, and cached results.
+These folders have to be populated by running the following notebooks in order (notebooks 2 and 3 require some of the folders to already be populated):
+* [1-Trajectories_generation.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/1-Trajectories_generation.ipynb) (populates `[datapath]/training-trajectories` and `[datapath]/validation-trajectories`)
+* [2-Training.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/2-Training.ipynb) (populates `data\models`, requires populated `[datapath]/training-trajectories`).
+* [3-Results.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/3-Results.ipynb) (populates `data\results-cache`, requires populated `[datapath]/validation-trajectories` and 
+`[datapath]/models`)
+
+
+
 
 ### Running codes in Google Colaboratory
 
