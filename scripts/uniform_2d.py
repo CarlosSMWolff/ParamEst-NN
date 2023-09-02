@@ -190,7 +190,7 @@ def main(params_id: int) -> None:
         columns=["logl", "information_gain_bits", "point_untransformed"], inplace=True
     )
     # name of the results file
-    results_name = f"uniform_2d_{params_id}.csv"
+    results_name = f"uniform_2d_{str(params_id).zfill(4)}.csv"
     # save to file
     post.to_csv(results_name, index=False)
     return
