@@ -14,3 +14,4 @@ data/results_cache/bayesian_estimation/.DS_Store
 paramest_nn.egg-info
 *.pdf
 *.tflite
+*.svg
