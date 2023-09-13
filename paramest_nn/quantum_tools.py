@@ -109,7 +109,7 @@ class QuantumModel:
             self.Einvhat = None
             self.eigs_hat = None
 
-    def simulateTrajectories(self, tfin = float, ntraj=int, tlistexp = None, seed = None, progress_bar = False):
+    def simulateTrajectories(self, tfin: float, ntraj:int, tlistexp = None, seed = None, progress_bar = False):
         """
         Generates an array of Monte Carlo jumps from the given quantum model.
 
@@ -143,7 +143,7 @@ class QuantumModel:
         if seed != None:
             options.seeds = np.arange(seed,seed+ ntraj)
 
-        if tlistexp==None:
+        if tlistexp is None:
             options.store_final_state = False
             tlist = [0,tfin]
             sol=mcsolve(H,psi0,tlist,c_ops,[],ntraj=ntraj,progress_bar=progress_bar,options=options)
