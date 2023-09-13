@@ -142,7 +142,7 @@ class QuantumModel:
         if seed != None:
             options.seeds = np.arange(seed,seed+ ntraj)
 
-        if len(tlistexp)==0:
+        if tlistexp==None:
             options.store_final_state = False
             tlist = [0,tfin]
             sol=mcsolve(H,psi0,tlist,c_ops,[],ntraj=ntraj,progress_bar=False,options=options)
