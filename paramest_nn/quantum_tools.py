@@ -109,7 +109,7 @@ class QuantumModel:
             self.Einvhat = None
             self.eigs_hat = None
 
-    def simulateTrajectories(self, tfin: float, ntraj:int, tlistexp = None, seed = None, progress_bar = False):
+    def simulateTrajectories(self, tfin: float, ntraj:int, tlistexp = None, seed = None, progress_bar = False, num_cpus = None):
         """
         Generates an array of Monte Carlo jumps from the given quantum model.
 
@@ -142,6 +142,9 @@ class QuantumModel:
         options = Options()
         if seed != None:
             options.seeds = np.arange(seed,seed+ ntraj)
+
+        if num_cpus is not None:
+            options.num_cpus = num_cpus
 
         if tlistexp is None:
             options.store_final_state = False
