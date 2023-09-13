@@ -109,7 +109,7 @@ class QuantumModel:
             self.Einvhat = None
             self.eigs_hat = None
 
-    def simulateTrajectories(self, tfin = float, ntraj=int, tlistexp = None, seed = None):
+    def simulateTrajectories(self, tfin = float, ntraj=int, tlistexp = None, seed = None, progress_bar = False):
         """
         Generates an array of Monte Carlo jumps from the given quantum model.
 
@@ -121,6 +121,7 @@ class QuantumModel:
             ntraj (int): Number of trajectories to simulate.
             tlistexp (array or None): If provided, an array of times where expectation values should be computed.
             seed (int or None): Seed value for random number generator.
+            progress_bar (bool): Whether to display a progress bar in the calculation.
 
         Returns:
         -----------
@@ -145,7 +146,7 @@ class QuantumModel:
         if tlistexp==None:
             options.store_final_state = False
             tlist = [0,tfin]
-            sol=mcsolve(H,psi0,tlist,c_ops,[],ntraj=ntraj,progress_bar=False,options=options)
+            sol=mcsolve(H,psi0,tlist,c_ops,[],ntraj=ntraj,progress_bar=progress_bar,options=options)
             times = sol.col_times
             taus = []
             for time_jumps in times:
@@ -158,7 +159,7 @@ class QuantumModel:
             options.store_states = True
             tlist = tlistexp
             sigma = c_ops[0]
-            sol=mcsolve(H,psi0,tlist,c_ops,[],ntraj=ntraj,progress_bar=False,options=options)
+            sol=mcsolve(H,psi0,tlist,c_ops,[],ntraj=ntraj,progress_bar=progress_bar,options=options)
             times = sol.col_times
             taus = []
             for time_jumps in times:
