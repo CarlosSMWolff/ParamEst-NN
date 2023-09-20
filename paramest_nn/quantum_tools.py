@@ -20,7 +20,7 @@ Functions:
     - compute_log_likelihood_analytical: Compute the logarithm of the likelihood analytically for the TLS model.
     - compute_neg_log_likelihood_analytical: Compute the negative logarithm of the likelihood analytically for the TLS model.
     - compute_likelihood_analytical: Compute the likelihood analytically for the TLS model.
-    - get_estimates: Calculate estimates of Delta (1D parameter estimation) in a coherently driven TLS by computing the probability distribution over a grid of Delta values.
+    - get_estimates_Bayesian: Calculate estimates of Delta (1D parameter estimation) in a coherently driven TLS by computing the probability distribution over a grid of Delta values.
     - prob_no_click: Calculates the probability of no jump occurring within a time delay tau after the last jump in a coherently driven TLS.
     - compute_waiting_time_list: Calculate the waiting time distribution of a coherently driven two-level system for a list of time delays.
     - compute_waiting_time: Calculates the waiting time distribution of a coherently driven two-level system based on Omega and Delta.
@@ -485,7 +485,7 @@ def compute_likelihood_analytical(Delta: float, data: np.array, gamma: float = 1
 
     return np.exp(log_likelihood)
 
-def get_estimates(data: np.array, output_probabilities=False, DeltaMin: float = 0., DeltaMax: float = 4., nDeltaGrid: int = 500):
+def get_estimates_Bayesian(data: np.array, output_probabilities=False, DeltaMin: float = 0., DeltaMax: float = 4., nDeltaGrid: int = 500):
     """
     Calculate estimates of Delta (1D parameter estimation) in a coherently driven TLS by computing the probability distribution over a grid of Delta values.
     Then, estimates are computed by taking the mean, median and maximum.
