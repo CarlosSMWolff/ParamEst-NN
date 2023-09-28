@@ -33,12 +33,7 @@ Functions:
 
 from qutip import *
 import numpy as np
-from scipy import optimize
-
-from scipy import stats
-from scipy.linalg import expm
-from scipy.stats import norm
-from time import time
+from scipy.integrate import cumtrapz
 import os
 
 from numpy import exp, cos, cosh, sqrt
@@ -485,7 +480,8 @@ def compute_likelihood_analytical(Delta: float, data: np.array, gamma: float = 1
 
     return np.exp(log_likelihood)
 
-def get_estimates_Bayesian(data: np.array, output_probabilities=False, DeltaMin: float = 0., DeltaMax: float = 4., nDeltaGrid: int = 500):
+
+def get_estimates_Bayesian(data: np.array, DeltaMin: float = 0., DeltaMax: float = 5., nDeltaGrid: int = 500, output_probabilities=False, only_mean = False):
     """
     Calculate estimates of Delta (1D parameter estimation) in a coherently driven TLS by computing the probability distribution over a grid of Delta values.
     Then, estimates are computed by taking the mean, median and maximum.
@@ -513,11 +509,16 @@ def get_estimates_Bayesian(data: np.array, output_probabilities=False, DeltaMin:
     likelihood_grid = np.array([compute_likelihood_analytical(Delta, data) for Delta in DeltaBayesListFine])
 
     # Compute the probability distribution by normalizing the likelihood
-    prob_grid = likelihood_grid / np.sum(likelihood_grid)
+    prob_grid = likelihood_grid / np.trapz(likelihood_grid, DeltaBayesListFine)
+    cdf_grid = cumtrapz(prob_grid, DeltaBayesListFine)
 
     # Calculate mean, median, and maximum estimates for delta
-    deltaMean = np.dot(DeltaBayesListFine, prob_grid)
-    deltaMedian = DeltaBayesListFine[np.argmin(np.abs(np.cumsum(prob_grid) - 0.5))]
+    deltaMean = np.trapz(prob_grid*DeltaBayesListFine, DeltaBayesListFine)
+
+    if only_mean == True:
+        return deltaMean
+
+    deltaMedian = DeltaBayesListFine[np.argmin(np.abs(cdf_grid - 0.5))]
     deltaMax = DeltaBayesListFine[np.argmax(prob_grid)]
 
     # Check if output_probabilities is requested
