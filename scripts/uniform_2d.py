@@ -13,6 +13,7 @@ from ultranest import ReactiveNestedSampler
 from functools import partial
 import logging
 import fire
+from paramest_nn.quantum_tools import create_directory
 
 logger = logging.getLogger("ultranest")
 logger.addHandler(logging.NullHandler())
@@ -192,7 +193,9 @@ def main(params_id: int) -> None:
         columns=["logl", "information_gain_bits", "point_untransformed"], inplace=True
     )
     # name of the results file
-    results_name = f"uniform_2d_{str(params_id).zfill(4)}.csv"
+    results_folder = "data/results_cache/bayesian_estimation/2D/estimationBayes2DUltranest/test/"
+    create_directory(results_folder)
+    results_name = results_folder +f"uniform_2d_{str(params_id).zfill(4)}.csv"
     # save to file
     post.to_csv(results_name, index=False)
     return

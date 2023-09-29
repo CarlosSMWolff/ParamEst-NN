@@ -4,9 +4,11 @@ import numpy as np
 
 # batch number and final output file for predictions
 idx_data = 0
-file_output = f"data/results_cache/bayesian_estimation/2D/estimationBayes2DUltranest/uniform_2d_predictions_{idx_data}.npy"
+results_folder = "data/results_cache/bayesian_estimation/2D/estimationBayes2DUltranest/test/"
+
+file_output = results_folder+f"uniform_2d_predictions_{idx_data}.npy"
 # these are the files, one for each parameter pair, with the posterior info
-file_pattern = "uniform_2d_*.csv"
+file_pattern = results_folder+"uniform_2d_*.csv"
 files = sorted(glob(file_pattern))
 # load posteriors for each parameter file
 df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
