@@ -54,7 +54,7 @@ Alternatively, you can directly run the notebooks setting the variable
 download_required = True
 ```
 
-and the data will be downloaded automatically.
+and the data will be downloaded automatically (requires the tool ```wget``` installed).
 
 #### Option #2: Populate the folder with your own computations
 
