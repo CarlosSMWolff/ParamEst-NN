@@ -3,7 +3,8 @@
 # Parameter Estimation from Photon Counting data with Neural Networks
 
 Parameter estimation via deep learning of quantum correlations in continuous photon counting measurements.
-This repository contains [Jupyter](https://jupyter.org/) notebooks with the codes necessary to reproduce the results in <a href = "https://arxiv.org/abs/" target="_blank"> this paper</a>.
+This repository contains [Jupyter](https://jupyter.org/) notebooks with the codes necessary to reproduce the results in the paper <a href = "https://arxiv.org/abs/" target="_blank"> "Parameter estimation by learning quantum correlations in continuous
+photon-counting data using neural networks"</a>.
 
 <p align="center"><img src="notebooks/figures/fig1.png"  align=middle width=600pt />
 </p>
