@@ -26,15 +26,17 @@ delta_max = 3.0
 # the frequency of the system can only take values between 0.25 and 5
 omega_min = 0.25
 omega_max = 5.0
-# number of trajectories to use for each parameter set
+# number of trajectories to use for each parameter set (minimum:1, maximum:10000)
 num_trajs = 1
 # TLS parameters
 gamma = 1.0
 # Trajectories info
 njumps = 48
 # path to downloaded data and parameters
-path_param = "data/validation-trajectories/2D-delta-omega/validation-deltas-2D-delta-omega-nsets-10000.npy"
-path_tau = "data/validation-trajectories/2D-delta-omega/validation-trajectories-2D-delta-omega-nsets-10000.npy"
+
+datapath = '../data/'
+path_param = datapath +"validation-trajectories/2D-delta-omega/validation-deltas-2D-delta-omega-nsets-10000.npy"
+path_tau = datapath + "validation-trajectories/2D-delta-omega/validation-trajectories-2D-delta-omega-nsets-10000.npy"
 
 
 #############
