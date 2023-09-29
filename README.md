@@ -125,10 +125,12 @@ Feel free to contact me to discuss any issues, questions or comments.
 ### BibTex reference format for citation for the Code
 
 ```bibtex
-@misc{ParamEstNN,
-title={},
-url={https://github.com/CarlosSMWolff/ParamEst-NN},
-note={GitHub repository containing deep learning approach for quantum parameter estimation with photon counting data.},
-author={Enrico Rinaldi, Carlos Sánchez Muñoz},
-  year={2023}
-}
+@software{sanchezmunoz2023_code,
+    author = {S{\'a}nchez Mu{\~n}oz, C. and Rinaldi, E. },
+    title = {{Code: Parameter estimation by learning quantum correlations in continuous photon-counting data using neural networks}},
+    url = {https://github.com/CarlosSMWolff/ParamEst-NN},
+    doi = {10.5281/zenodo.8392691},
+    version = {0.0.0},
+    year = {2023}
+    }
+
