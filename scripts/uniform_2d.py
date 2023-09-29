@@ -34,7 +34,7 @@ gamma = 1.0
 njumps = 48
 # path to downloaded data and parameters
 
-datapath = '../data/'
+datapath = 'data/'
 path_param = datapath +"validation-trajectories/2D-delta-omega/validation-deltas-2D-delta-omega-nsets-10000.npy"
 path_tau = datapath + "validation-trajectories/2D-delta-omega/validation-trajectories-2D-delta-omega-nsets-10000.npy"
 
