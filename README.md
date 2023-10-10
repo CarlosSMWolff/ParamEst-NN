@@ -1,9 +1,9 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8305509.svg)](https://www.dropbox.com/scl/fi/mkbs1kvn06mvsd5k5v0z9/data.zip?rlkey=k6otygqljpv9aj3bkjp0pjey3&dl=0)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8305509.svg)](https://zenodo.org/record/8305509)
 
 # Parameter Estimation from Photon Counting data with Neural Networks
 
 Parameter estimation via deep learning of quantum correlations in continuous photon counting measurements.
-This repository contains [Jupyter](https://jupyter.org/) notebooks with the codes necessary to reproduce the results in the paper <a href = "https://arxiv.org/abs/" target="_blank"> "Parameter estimation by learning quantum correlations in continuous
+This repository contains [Jupyter](https://jupyter.org/) notebooks with the codes necessary to reproduce the results in the paper <a href = "https://arxiv.org/abs/2310.02309" target="_blank"> "Parameter estimation by learning quantum correlations in continuous
 photon-counting data using neural networks"</a>.
 
 <p align="center"><img src="notebooks/figures/fig1.png"  align=middle width=600pt />
@@ -45,8 +45,9 @@ At the beginning of each notebook, the path to a directory where data is loaded 
 
 #### Option #1: Download the data
 
-You can download the necessary content of the ```[datapath]/``` folder in order to reproduce our results in <a href = "https://arxiv.org/abs/" target="_blank"> the paper</a>
-from Zenodo at [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8305509.svg)](https://www.dropbox.com/scl/fi/mkbs1kvn06mvsd5k5v0z9/data.zip?rlkey=k6otygqljpv9aj3bkjp0pjey3&dl=0).
+You can download the necessary content of the ```[datapath]/``` folder in order to reproduce our results in <a href = "https://arxiv.org/abs/2310.02309" target="_blank"> "Parameter estimation by learning quantum correlations in continuous photon-counting data using neural networks
+"</a>
+from Zenodo at [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.8305509.svg)](https://zenodo.org/record/8305509).
 
 Alternatively, you can directly run the notebooks setting the variable
 
