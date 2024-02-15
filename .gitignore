@@ -16,3 +16,4 @@ paramest_nn.egg-info
 *.tflite
 *.svg
 *.pkl
+notebooks/3-Results-reply.ipynb
