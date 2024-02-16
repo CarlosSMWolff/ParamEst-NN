@@ -480,6 +480,28 @@ def compute_likelihood_analytical(Delta: float, data: np.array, gamma: float = 1
 
     return np.exp(log_likelihood)
 
+def compute_likelihood_analytical_Classical(Delta: float, data: np.array, gamma: float = 1., Omega: float = 1.) -> np.array:
+    """
+    Returns the likelihood function P(D|Delta) that will tell us how probable the *CLASSICAL* data D is, given our model with parameters Delta.
+    This calculation uses analytical formulas for the likelihood.
+
+    Parameters:
+    -----------
+    Delta (float): Model parameter Delta. This is the parameter being estimated.
+    data (np.array): The trajectory data in the form of an array of time delays
+    gamma (float): Model parameter gamma (asssumed known)
+    Omega (float): Model parameter Omega (assumed known)
+
+    Returns:
+    -----------
+    np.array: The likelihood function for each observation (we compute it after each jump)
+    """
+    N = len(data)
+    tau = np.mean(data)
+    sigma = np.sqrt(((gamma**2 + 4*Delta**2)**2 - 8*(gamma**2 - 12*Delta**2)*Omega**2 + 64*Omega**4)/(N*gamma**2 * Omega**4))/4
+    mu = (gamma**2 + 4*Delta**2 + 8*Omega**2)/(4*gamma*Omega**2)
+    return np.exp(-0.5*((tau-mu)/sigma)**2)/(sigma*np.sqrt(2*np.pi))
+
 
 def get_estimates_Bayesian(data: np.array, DeltaMin: float = 0., DeltaMax: float = 5., nDeltaGrid: int = 500, output_probabilities=False, only_mean = False):
     """
