@@ -94,6 +94,36 @@ python script/concat_results.py
 
 after adjusting the `idx_data` variable in the script to match the batch of validation trajectories used to create the `CSV` files of the posteriors.
 
+##### Instructions for 2D simulation-based inference with `sbi`
+
+The notebook [`4-NPE.ipynb`](./notebooks/4-NPE.ipynb) performs Neural Posterior Estimation (NPE) on the training trajectories using the [`lampe`](https://lampe.readthedocs.io) package.
+The script [`scripts/npe_2d_sbi.py`](./scripts/npe_2d_sbi.py) follows the same steps but is written directly against the [`sbi`](https://sbi.readthedocs.io) package, so that training, sampling, plotting and calibration checks all come from one library.
+Run
+
+```shell
+python scripts/npe_2d_sbi.py --help
+```
+
+to see the usage instructions.
+The default run trains a masked autoregressive flow on the raw trajectories,
+
+```shell
+python scripts/npe_2d_sbi.py --num_train=512000 --max_num_epochs=50
+```
+
+while the second variant of the notebook, a neural spline flow fed by a permutation-invariant (DeepSets) summary of the trajectory, is obtained with
+
+```shell
+python scripts/npe_2d_sbi.py --embedding=deepset --model=zuko_nsf \
+    --hidden_features=64 --max_num_epochs=15
+```
+
+The training pairs are read from `[datapath]/training-trajectories/2D-delta-omega/`, so the training data has to be [downloaded or generated](#populating-the-datapath-folder) first.
+Each run writes to `--outdir` (`[datapath]/models/npe-sbi-2D/` by default) the trained density estimator, the pickled posterior, a `summary.json` with the numerical results, and figures for the training data, the posterior at a held-out observation, and the calibration checks.
+
+A trained posterior is only worth reporting once it has been validated, so every run also performs three checks on held-out (parameter, trajectory) pairs, which are prior draws and prior predictives by construction: simulation-based calibration (SBC) on the marginals, the expected coverage of the notebook, and TARP.
+The posterior predictive check, which re-runs the `qutip` simulator, is slower and is enabled with `--run_ppc`.
+
 ### Running codes in Google Colaboratory
 
 The notebooks are ready to be used in Google Colaboratory, which can be done by pressing ![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg) at the top of each notebook.  When running in Colab, data will be downloaded automatically.
@@ -115,6 +145,10 @@ Trains neural networks for the problem of quantum parameter estimation.
 ### [3-Results.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/3-Results.ipynb)
 
 Reproduces the main figures shown in the manuscript, assessing the performance of the trained models.
+
+### [4-NPE.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/4-NPE.ipynb)
+
+Estimates the 2D posterior over the parameters with Neural Posterior Estimation, using the `lampe` package. The same steps written against the `sbi` package are available as the script [`scripts/npe_2d_sbi.py`](./scripts/npe_2d_sbi.py).
 
 ## Contact  
 
