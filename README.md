@@ -100,13 +100,14 @@ The notebook [`4-NPE.ipynb`](./notebooks/4-NPE.ipynb) performs Neural Posterior 
 It was originally written against [`lampe`](https://github.com/probabilists/lampe), whose development has since stopped in favour of `sbi`.
 The script [`scripts/npe_2d_sbi.py`](./scripts/npe_2d_sbi.py) is the command line version of the same workflow, convenient for running on a cluster.
 
-**Remark on the environment**: the notebook and the script were written against `sbi` 0.27, which requires Python 3.10 or newer, while the `ParamEst-NN-Env` environment above pins Python 3.9 for TensorFlow and `qutip` 4. The simplest route is therefore a separate environment for this part, with `torch` and `sbi` only:
+**Remark on the environment**: the notebook and the script were written against `sbi` 0.27, which requires Python 3.10 or newer, while the `ParamEst-NN-Env` environment pins Python 3.9 for TensorFlow and `qutip` 4. This part therefore has its own environment file:
 
 ```shell
-conda create -n torch-sbi python=3.11
+conda env create -f environment-sbi.yml
 conda activate torch-sbi
-pip install sbi fire
 ```
+
+The only piece that needs the main environment instead is the optional posterior predictive check of the script (`--run_ppc`), which calls the `qutip` simulator.
 
 Run
 
