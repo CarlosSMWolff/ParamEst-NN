@@ -2,8 +2,9 @@
 Neural Posterior Estimation (NPE) on photon-counting trajectories for the 2D
 parameter space (Delta, Omega), written directly against the `sbi` package.
 
-This script follows the same steps as the notebook `notebooks/4-NPE.ipynb`, which
-uses `lampe`, but replaces every `lampe` component with its `sbi` equivalent:
+This script is the command line version of the notebook `notebooks/4-NPE.ipynb`.
+Both used to be written against `lampe`, whose development has stopped in favour
+of `sbi`; the mapping between the two libraries is:
 
     lampe                                  ->  sbi
     ------------------------------------------------------------------------

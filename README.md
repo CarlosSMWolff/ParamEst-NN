@@ -96,8 +96,18 @@ after adjusting the `idx_data` variable in the script to match the batch of vali
 
 ##### Instructions for 2D simulation-based inference with `sbi`
 
-The notebook [`4-NPE.ipynb`](./notebooks/4-NPE.ipynb) performs Neural Posterior Estimation (NPE) on the training trajectories using the [`lampe`](https://lampe.readthedocs.io) package.
-The script [`scripts/npe_2d_sbi.py`](./scripts/npe_2d_sbi.py) follows the same steps but is written directly against the [`sbi`](https://sbi.readthedocs.io) package, so that training, sampling, plotting and calibration checks all come from one library.
+The notebook [`4-NPE.ipynb`](./notebooks/4-NPE.ipynb) performs Neural Posterior Estimation (NPE) on the training trajectories with the [`sbi`](https://sbi.readthedocs.io) package.
+It was originally written against [`lampe`](https://github.com/probabilists/lampe), whose development has since stopped in favour of `sbi`.
+The script [`scripts/npe_2d_sbi.py`](./scripts/npe_2d_sbi.py) is the command line version of the same workflow, convenient for running on a cluster.
+
+**Remark on the environment**: the notebook and the script were written against `sbi` 0.27, which requires Python 3.10 or newer, while the `ParamEst-NN-Env` environment above pins Python 3.9 for TensorFlow and `qutip` 4. The simplest route is therefore a separate environment for this part, with `torch` and `sbi` only:
+
+```shell
+conda create -n torch-sbi python=3.11
+conda activate torch-sbi
+pip install sbi fire
+```
+
 Run
 
 ```shell
@@ -148,7 +158,7 @@ Reproduces the main figures shown in the manuscript, assessing the performance o
 
 ### [4-NPE.ipynb](https://github.com/CarlosSMWolff/ParamEst-NN/blob/main/notebooks/4-NPE.ipynb)
 
-Estimates the 2D posterior over the parameters with Neural Posterior Estimation, using the `lampe` package. The same steps written against the `sbi` package are available as the script [`scripts/npe_2d_sbi.py`](./scripts/npe_2d_sbi.py).
+Estimates the 2D posterior over the parameters with Neural Posterior Estimation, using the `sbi` package, and checks the calibration of the result with SBC, expected coverage and TARP. The same workflow is available as the script [`scripts/npe_2d_sbi.py`](./scripts/npe_2d_sbi.py).
 
 ## Contact  
 
