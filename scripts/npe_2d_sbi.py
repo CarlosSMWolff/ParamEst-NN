@@ -68,8 +68,8 @@ DELTA_MIN, DELTA_MAX = 0.0, 3.0
 OMEGA_MIN, OMEGA_MAX = 0.25, 5.0
 
 # Relative paths of the training data inside `datapath`
-PARAMS_FILE = "training-trajectories/2D-delta-omega/param_rand_list-2D.npy"
-TAUS_FILE = "training-trajectories/2D-delta-omega/taus-2D.npy"
+PARAMS_FILE = "2D-delta-omega/param_rand_list-2D.npy"
+TAUS_FILE = "2D-delta-omega/taus-2D.npy"
 
 # Density estimators that support mapping a bounded theta to an unconstrained
 # space, which is the `sbi` counterpart of the manual [-1, 1] rescaling of theta
@@ -546,12 +546,12 @@ def resolve_device(device: str) -> str:
 #  MAIN     #
 #############
 def main(
-    datapath: str = "data/",
+    datapath: str = "data/training-trajectories/",
     outdir: str = "data/models/npe-sbi-2D/",
     num_train: int = 512_000,
     num_diagnostic: int = 256,
     obs_index: int = 1_000_000,
-    model: str = "zuko_maf",
+    model: str = "zuko_nsf",
     embedding: str = "none",
     hidden_features: int = 128,
     num_transforms: int = 3,
