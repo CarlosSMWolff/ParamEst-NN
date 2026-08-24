@@ -334,6 +334,9 @@ def evaluate_observation(
     """
     samples = posterior.sample((num_posterior_samples,), x=x_star)
     samples = samples.detach().cpu()
+    # `pairplot` converts what it is given with `.numpy()`, which only works for
+    # tensors that are already on the host.
+    theta_star = theta_star.detach().cpu()
 
     limits = [[DELTA_MIN, DELTA_MAX], [OMEGA_MIN, OMEGA_MAX]]
     fig, _ = pairplot(
@@ -392,13 +395,17 @@ def run_diagnostics(
     results: Dict[str, Any] = {"num_diagnostic_pairs": int(thetas.shape[0])}
 
     # --- SBC on the marginals ------------------------------------------------
+    # `run_sbc` samples the posterior, so `thetas` and `xs` have to be on its
+    # device; its outputs come back on that device and are moved to the host
+    # here, because `check_sbc` and the plots go through numpy.
     ranks, dap_samples = run_sbc(
         thetas, xs, posterior, num_posterior_samples=num_posterior_samples
     )
+    ranks, dap_samples = ranks.cpu(), dap_samples.cpu()
     stats = check_sbc(
-        ranks, thetas, dap_samples, num_posterior_samples=num_posterior_samples
+        ranks, thetas.cpu(), dap_samples, num_posterior_samples=num_posterior_samples
     )
-    results["sbc"] = {k: v.tolist() for k, v in stats.items()}
+    results["sbc"] = {k: np.asarray(v).tolist() for k, v in stats.items()}
     fig, _ = sbc_rank_plot(
         ranks,
         num_posterior_samples,
@@ -417,6 +424,7 @@ def run_diagnostics(
         num_posterior_samples=num_posterior_samples,
         reduce_fns=posterior.log_prob,
     )
+    cov_ranks = cov_ranks.cpu()
     fig, _ = sbc_rank_plot(
         cov_ranks,
         num_posterior_samples,
@@ -431,6 +439,7 @@ def run_diagnostics(
     ecp, alpha = run_tarp(
         thetas, xs, posterior, num_posterior_samples=num_posterior_samples
     )
+    ecp, alpha = ecp.cpu(), alpha.cpu()
     atc, ks_pval = check_tarp(ecp, alpha)
     results["tarp"] = {"atc": float(atc), "ks_pval": float(ks_pval)}
     fig, _ = plot_tarp(ecp, alpha)
@@ -622,15 +631,21 @@ def main(
     )
     assert obs_index < len(params), f"obs_index={obs_index} is out of range"
 
+    # The training pairs stay on the CPU: `train` moves them across one
+    # mini-batch at a time, so keeping the whole set on the accelerator would
+    # only waste its memory.
     theta_train = torch.as_tensor(params[:num_train], dtype=torch.float32)
     x_train = prepare_x(taus[:num_train], embedding)
 
+    # Everything handed to the *trained* posterior does have to live on its
+    # device: `sbi` only moves `x` for the observation set with `set_default_x`,
+    # and leaves a tensor passed straight to `sample(x=...)` where it is.
     diag_slice = slice(num_train, num_train + num_diagnostic)
-    theta_diag = torch.as_tensor(params[diag_slice], dtype=torch.float32)
-    x_diag = prepare_x(taus[diag_slice], embedding)
+    theta_diag = torch.as_tensor(params[diag_slice], dtype=torch.float32).to(device)
+    x_diag = prepare_x(taus[diag_slice], embedding).to(device)
 
-    theta_star = torch.as_tensor(params[obs_index], dtype=torch.float32)
-    x_star = prepare_x(taus[obs_index][None, :], embedding)[0]
+    theta_star = torch.as_tensor(params[obs_index], dtype=torch.float32).to(device)
+    x_star = prepare_x(taus[obs_index][None, :], embedding)[0].to(device)
 
     # --- Train the NPE -------------------------------------------------------
     prior = build_prior(device=device)

@@ -20,6 +20,13 @@ dependencies:
   - jupyter
   - matplotlib
   - numpy
+  # `torch` comes from pip and bundles its own copy of the OpenMP runtime. The
+  # default `libopenblas` of conda-forge is built against `llvm-openmp` and
+  # pulls in a second one, and loading both aborts the process with
+  # "OMP: Error #15: Initializing libomp.dylib, but found libomp.dylib already
+  # initialized". The pthreads build of OpenBLAS needs no OpenMP runtime, which
+  # leaves `torch`'s as the only one in the environment.
+  - libopenblas=*=pthreads*
   - pip
   - pip:
     - torch
