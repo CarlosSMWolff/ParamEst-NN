@@ -173,6 +173,15 @@ Its histogram layer becomes the fixed per-delay network of the same `Permutation
 The bins are non-trainable hyperparameters as in the paper, 700 of them over `[0, 100/gamma]`, adjustable with `--hist_nbins` and `--hist_taumax`.
 Because those bin edges live in physical units of `tau` while `sbi` standardises the trajectories *before* the embedding, this option forces `--z_score_x=none` and says so when it does.
 
+Finally, `--embedding=cnn` reads the 48 delays as a time series and runs `sbi`'s `CNNEmbedding` (1D convolutions, kernel width set by `--cnn_kernel_size`) over them:
+
+```shell
+python scripts/npe_2d_sbi.py --embedding=cnn --max_num_epochs=50
+```
+
+This is the one summary that is not permutation invariant, and for this system that is a mismatch rather than a feature: the two-level system collapses to its ground state after every emission, so the delays are independent and their order carries no information.
+It is included as the control that measures what a model pays for not being told that the delays are exchangeable — the same question the paper raises about its recurrent architecture, which performed well despite the mismatch.
+
 The training pairs are read from `[datapath]/training-trajectories/2D-delta-omega/`, so the training data has to be [downloaded or generated](#populating-the-datapath-folder) first, and, if it was downloaded, [repaired](#repairing-the-published-training-trajectories).
 Each run writes to `--outdir` (`[datapath]/models/npe-sbi-2D/` by default) the trained density estimator, the pickled posterior, a `summary.json` with the numerical results, and figures for the training data, the posterior at a held-out observation, and the calibration checks.
 

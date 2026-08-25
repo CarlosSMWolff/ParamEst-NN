@@ -3,25 +3,18 @@ Neural Posterior Estimation (NPE) on photon-counting trajectories for the 2D
 parameter space (Delta, Omega), written directly against the `sbi` package.
 
 This script is the command line version of the notebook `notebooks/4-NPE.ipynb`.
-Both used to be written against `lampe`, whose development has stopped in favour
-of `sbi`; the mapping between the two libraries is:
-
-    lampe                                  ->  sbi
-    ------------------------------------------------------------------------
-    lampe.data.H5Dataset                   ->  NPE.append_simulations(theta, x)
-    lampe.inference.NPE (zuko flow)        ->  sbi.inference.NPE + posterior_nn
-    lampe.inference.NPELoss + GDStep       ->  NPE.train(...)
-    manual preprocess/postprocess of theta ->  z_score_theta / prior transform
-    estimator.flow(x).sample(...)          ->  posterior.sample((n,), x=x_o)
-    lampe.plots.corner / mark_point        ->  sbi.analysis.pairplot(points=...)
-    lampe.diagnostics.expected_coverage_mc ->  sbi.diagnostics.run_sbc + run_tarp
-    custom DeepSet embedding               ->  PermutationInvariantEmbedding
 
 `--embedding=hist` is the `Hist-Dense` architecture of the paper carried over to
 the posterior: its histogram layer becomes the fixed per-delay network of the
 same `PermutationInvariantEmbedding`, whose sum over the jump axis is the
 histogram, and the flow takes the place of the dense regression head. It needs
 the delays in physical units, so it forces `z_score_x="none"`.
+
+`--embedding=cnn` instead reads the 48 delays as a time series and runs `sbi`'s
+`CNNEmbedding` over them. It is the one summary here that is not permutation
+invariant, which for this system is a mismatch rather than a feature -- the
+delays are independent, so their order carries nothing -- and it is included as
+the control that measures what that mismatch costs.
 
 The training pairs are the ones produced by `1-Trajectories_generation.ipynb` and
 distributed on Zenodo: `param_rand_list-2D.npy` holds parameters drawn from a
@@ -37,6 +30,7 @@ Usage
     python scripts/npe_2d_sbi.py --embedding=deepset --model=zuko_nsf \
         --hidden_features=64 --max_num_epochs=15
     python scripts/npe_2d_sbi.py --embedding=hist --max_num_epochs=50
+    python scripts/npe_2d_sbi.py --embedding=cnn --max_num_epochs=50
 
 Outputs (figures, the trained posterior and a JSON summary) are written to
 `--outdir`, which defaults to `data/models/npe-sbi-2D/`.
@@ -60,6 +54,7 @@ from sbi.diagnostics import check_sbc, check_tarp, run_sbc, run_tarp  # noqa: E4
 from sbi.inference import NPE  # noqa: E402
 from sbi.neural_nets import posterior_nn  # noqa: E402
 from sbi.neural_nets.embedding_nets import (  # noqa: E402
+    CNNEmbedding,
     FCEmbedding,
     PermutationInvariantEmbedding,
 )
@@ -78,9 +73,9 @@ OMEGA_MIN, OMEGA_MAX = 0.25, 5.0
 PARAMS_FILE = "2D-delta-omega/param_rand_list-2D.npy"
 TAUS_FILE = "2D-delta-omega/taus-2D.npy"
 
-# Density estimators that support mapping a bounded theta to an unconstrained
-# space, which is the `sbi` counterpart of the manual [-1, 1] rescaling of theta
-# done in the notebook, and which also removes NPE leakage outside the prior box.
+# Density estimators that can map a bounded theta to an unconstrained space,
+# which keeps the flow from putting posterior mass outside the prior box and so
+# removes the need to reject the samples that leak out of it.
 UNCONSTRAINED_OK = ("mdn", "zuko_")
 
 
@@ -231,29 +226,46 @@ def build_embedding_net(
     hidden_features: int,
     hist_nbins: int = 700,
     hist_taumax: float = 100.0,
+    njumps: int = 48,
+    cnn_kernel_size: int = 5,
 ) -> Optional[torch.nn.Module]:
     """Build the embedding network that summarises a trajectory before it is fed
     to the flow.
 
     A trajectory is a set of time delays whose order carries no information, so
     the natural choice is a permutation-invariant (DeepSets) summary: `sbi` ships
-    one as `PermutationInvariantEmbedding`, which plays the role of the
-    hand-written `DeepSet` module of the notebook.
+    one as `PermutationInvariantEmbedding`.
 
-    Both summaries offered here are that same object and differ only in the
-    per-delay network it pools over: "deepset" learns it, while "hist" fixes it
-    to the histogram bins of the paper's `Hist-Dense` architecture.
+    Two of the summaries offered here are that same object and differ only in
+    the per-delay network it pools over: "deepset" learns it, while "hist" fixes
+    it to the histogram bins of the paper's `Hist-Dense` architecture.
+
+    "cnn" is the odd one out. It reads the 48 time delays as a *time series* and
+    slides 1D convolutions along them, so unlike the two above it is not
+    permutation invariant and can in principle use the order of the jumps. For
+    this system that order carries no information -- the two-level system
+    collapses to its ground state after every emission, so the delays are
+    independent -- which makes this a useful control rather than a physically
+    motivated choice: it measures what a model pays for not being told that the
+    delays are exchangeable. The paper makes the same point about its recurrent
+    architecture, which performed well despite the same mismatch.
 
     Args:
         embedding (str): "none" (feed the raw trajectory to the flow), "deepset"
-            (learned permutation-invariant summary), or "hist" (the same pooling
-            over the paper's fixed histogram bins).
+            (learned permutation-invariant summary), "hist" (the same pooling
+            over the paper's fixed histogram bins), or "cnn" (1D convolutions
+            over the trajectory read as a time series).
         embedding_output_dim (int): The dimension of the summary handed to the
             flow. For "deepset" it is also the per-delay latent dimension; for
             "hist" that role is played by `hist_nbins` instead.
         hidden_features (int): Width of the hidden layers of the embedding.
         hist_nbins (int): Number of histogram bins, only used by "hist".
         hist_taumax (float): Upper edge of the binned range, only used by "hist".
+        njumps (int): Length of a trajectory, only used by "cnn", which needs the
+            input length up front to size its fully connected layers.
+        cnn_kernel_size (int): Width of the convolution kernels, only used by
+            "cnn". With the default two convolutions and pooling by two, a
+            trajectory of 48 delays is reduced to 12 positions.
 
     Returns:
         Optional[torch.nn.Module]: The embedding network, or None when the raw
@@ -261,9 +273,21 @@ def build_embedding_net(
     """
     if embedding == "none":
         return None
-    if embedding not in ("deepset", "hist"):
+    if embedding not in ("deepset", "hist", "cnn"):
         raise ValueError(
-            f"Unknown embedding '{embedding}', use 'none', 'deepset' or 'hist'"
+            f"Unknown embedding '{embedding}', use 'none', 'deepset', 'hist' "
+            f"or 'cnn'"
+        )
+
+    if embedding == "cnn":
+        # `input_shape=(L,)` is what selects Conv1d over Conv2d; the channel axis
+        # is added by the module itself, so the trajectories are fed as
+        # (num_pairs, njumps) with no trial axis, unlike the two summaries below.
+        return CNNEmbedding(
+            input_shape=(njumps,),
+            output_dim=embedding_output_dim,
+            num_linear_units=hidden_features,
+            kernel_size=cnn_kernel_size,
         )
 
     trial_net: torch.nn.Module
@@ -317,15 +341,15 @@ def build_density_estimator(
             one mean and std across the jumps, which is the natural choice here
             because every entry of a trajectory is the same physical quantity;
             "independent" standardises each jump separately, and "none" leaves
-            the trajectory untouched as the notebook does.
+            the trajectory untouched, which is what embedding="hist" needs.
 
     Returns:
         Callable: The density estimator builder consumed by `NPE`.
     """
-    # The notebook rescales theta to [-1, 1] by hand before training. In `sbi`
-    # the equivalent is done by the estimator itself; for the zuko/mdn backends
-    # we can go one better and map the bounded theta to an unconstrained space,
-    # which additionally prevents the posterior from leaking outside the prior.
+    # theta is bounded by the prior box, so it is rescaled before the flow sees
+    # it. For the zuko/mdn backends `sbi` can map it to an unconstrained space
+    # rather than merely standardising it, which additionally prevents the
+    # posterior from leaking outside the prior.
     kwargs: Dict[str, Any] = {
         "model": model,
         "hidden_features": hidden_features,
@@ -352,9 +376,10 @@ def prepare_x(taus: np.ndarray, embedding: str) -> torch.Tensor:
         embedding (str): The embedding choice, see `build_embedding_net`.
 
     Returns:
-        torch.Tensor: Shape (num_pairs, njumps) without an embedding, and
-        (num_pairs, njumps, 1) with either permutation-invariant one, which
-        expects an explicit trial axis.
+        torch.Tensor: Shape (num_pairs, njumps) for "none" and for "cnn", which
+        reads the trajectory as a series and adds its own channel axis, and
+        (num_pairs, njumps, 1) for the two permutation-invariant summaries,
+        which expect an explicit trial axis.
     """
     x = torch.as_tensor(taus, dtype=torch.float32)
     if embedding in ("deepset", "hist"):
@@ -379,9 +404,8 @@ def train_npe(
 ) -> Tuple[NPE, Any]:
     """Train the NPE on the simulated pairs.
 
-    The notebook writes its own loop over `NPELoss` and `GDStep`; `sbi` does the
-    same thing inside `NPE.train`, including the train/validation split, the
-    gradient clipping and early stopping.
+    `NPE.train` runs the whole optimisation, including the train/validation
+    split, the gradient clipping and early stopping on the validation loss.
 
     Args:
         theta (torch.Tensor): Parameters, shape (num_pairs, 2).
@@ -407,7 +431,7 @@ def train_npe(
         validation_fraction=validation_fraction,
         stop_after_epochs=stop_after_epochs,
         max_num_epochs=max_num_epochs,
-        clip_max_norm=1.0,  # same gradient clipping as the notebook's GDStep
+        clip_max_norm=1.0,  # gradient clipping, as in the notebook
         show_train_summary=True,
     )
     return trainer, estimator
@@ -424,7 +448,7 @@ def evaluate_observation(
     outdir: Path,
 ) -> Dict[str, List[float]]:
     """Sample the posterior at a held-out observation and plot it against the
-    ground truth, the `sbi` counterpart of `lampe`'s corner + mark_point.
+    ground truth.
 
     Args:
         posterior (Any): The trained posterior.
@@ -482,8 +506,9 @@ def run_diagnostics(
     * SBC on the marginals: is each parameter's posterior too narrow or too wide
       on average? A flat rank histogram cannot be rejected.
     * Expected coverage: the same machinery applied to the joint log-probability,
-      which is what the notebook computes with `expected_coverage_mc`. In the CDF
-      plot, below the diagonal means over-confident.
+      which also catches errors in the correlation between the parameters that
+      the per-parameter histograms cannot. In the CDF plot, below the diagonal
+      means over-confident.
     * TARP: a necessary and sufficient check of posterior correctness, read like
       SBC when the default (uniform) references are used.
 
@@ -663,6 +688,7 @@ def main(
     embedding_output_dim: int = 16,
     hist_nbins: int = 700,
     hist_taumax: float = 100.0,
+    cnn_kernel_size: int = 5,
     z_score_x: str = "structured",
     training_batch_size: int = 256,
     learning_rate: float = 1e-3,
@@ -690,8 +716,9 @@ def main(
             must fall outside the training and diagnostic slices.
         model (str): Flow family for q(theta|x), e.g. "zuko_maf" or "zuko_nsf".
         embedding (str): "none", "deepset" (learned permutation-invariant
-            summary) or "hist" (the same pooling over the paper's fixed
-            histogram bins). "hist" forces z_score_x="none", see below.
+            summary), "hist" (the same pooling over the paper's fixed histogram
+            bins) or "cnn" (1D convolutions over the trajectory read as a time
+            series). "hist" forces z_score_x="none", see below.
         hidden_features (int): Width of the hidden layers of the flow.
         num_transforms (int): Number of autoregressive transforms of the flow.
         embedding_output_dim (int): Dimension of the trajectory summary handed
@@ -700,6 +727,7 @@ def main(
             paper's value is 700.
         hist_taumax (float): Upper edge of the binned range for
             embedding="hist", in units of 1/gamma. The paper's value is 100.
+        cnn_kernel_size (int): Convolution kernel width for embedding="cnn".
         z_score_x (str): Standardisation of the trajectories, one of
             "structured", "independent" or "none". Ignored for
             embedding="hist", which needs the delays in physical units.
@@ -777,7 +805,13 @@ def main(
         z_score_x = "none"
 
     embedding_net = build_embedding_net(
-        embedding, embedding_output_dim, hidden_features, hist_nbins, hist_taumax
+        embedding,
+        embedding_output_dim,
+        hidden_features,
+        hist_nbins,
+        hist_taumax,
+        njumps,
+        cnn_kernel_size,
     )
     density_estimator = build_density_estimator(
         model, hidden_features, num_transforms, embedding_net, prior, z_score_x
@@ -810,6 +844,7 @@ def main(
             "embedding_output_dim": embedding_output_dim,
             "hist_nbins": hist_nbins if embedding == "hist" else None,
             "hist_taumax": hist_taumax if embedding == "hist" else None,
+            "cnn_kernel_size": cnn_kernel_size if embedding == "cnn" else None,
             "z_score_x": z_score_x,
             "training_batch_size": training_batch_size,
             "learning_rate": learning_rate,
