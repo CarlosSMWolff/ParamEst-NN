@@ -163,6 +163,16 @@ python scripts/npe_2d_sbi.py --embedding=deepset --model=zuko_nsf \
     --hidden_features=64 --max_num_epochs=15
 ```
 
+A third summary, `--embedding=hist`, carries the `Hist-Dense` architecture of the paper over to the posterior:
+
+```shell
+python scripts/npe_2d_sbi.py --embedding=hist --max_num_epochs=50
+```
+
+Its histogram layer becomes the fixed per-delay network of the same `PermutationInvariantEmbedding` used by `--embedding=deepset`, whose sum over the jump axis is the histogram, and the flow replaces the dense regression head.
+The bins are non-trainable hyperparameters as in the paper, 700 of them over `[0, 100/gamma]`, adjustable with `--hist_nbins` and `--hist_taumax`.
+Because those bin edges live in physical units of `tau` while `sbi` standardises the trajectories *before* the embedding, this option forces `--z_score_x=none` and says so when it does.
+
 The training pairs are read from `[datapath]/training-trajectories/2D-delta-omega/`, so the training data has to be [downloaded or generated](#populating-the-datapath-folder) first, and, if it was downloaded, [repaired](#repairing-the-published-training-trajectories).
 Each run writes to `--outdir` (`[datapath]/models/npe-sbi-2D/` by default) the trained density estimator, the pickled posterior, a `summary.json` with the numerical results, and figures for the training data, the posterior at a held-out observation, and the calibration checks.
 

@@ -17,6 +17,12 @@ of `sbi`; the mapping between the two libraries is:
     lampe.diagnostics.expected_coverage_mc ->  sbi.diagnostics.run_sbc + run_tarp
     custom DeepSet embedding               ->  PermutationInvariantEmbedding
 
+`--embedding=hist` is the `Hist-Dense` architecture of the paper carried over to
+the posterior: its histogram layer becomes the fixed per-delay network of the
+same `PermutationInvariantEmbedding`, whose sum over the jump axis is the
+histogram, and the flow takes the place of the dense regression head. It needs
+the delays in physical units, so it forces `z_score_x="none"`.
+
 The training pairs are the ones produced by `1-Trajectories_generation.ipynb` and
 distributed on Zenodo: `param_rand_list-2D.npy` holds parameters drawn from a
 uniform prior, `taus-2D.npy` holds one simulated trajectory of `njumps` time
@@ -30,6 +36,7 @@ Usage
     python scripts/npe_2d_sbi.py --num_train=512000 --max_num_epochs=50
     python scripts/npe_2d_sbi.py --embedding=deepset --model=zuko_nsf \
         --hidden_features=64 --max_num_epochs=15
+    python scripts/npe_2d_sbi.py --embedding=hist --max_num_epochs=50
 
 Outputs (figures, the trained posterior and a JSON summary) are written to
 `--outdir`, which defaults to `data/models/npe-sbi-2D/`.
@@ -146,8 +153,84 @@ def build_prior(device: str = "cpu") -> BoxUniform:
     )
 
 
+class HistogramBins(torch.nn.Module):
+    """A fixed bank of soft histogram bins, applied to one time delay at a time.
+
+    This is the first layer of the `Hist-Dense` architecture of the paper, ported
+    from `paramest_nn.custom_layers.MyHistogramLayer_Sigmoid`. Bin `b`, centred on
+    `c_b`, responds to a delay `tau` with
+
+        sigmoid((tau - c_b + w/2) * f) * sigmoid((-(tau - c_b) + w/2) * f)
+
+    for a bin width `w` and a sharpness `f`. Finite `f` makes the bins soft and
+    overlapping, so the counts are not integers; it also means the position of a
+    delay inside its bin survives in how it splits between neighbours, which a
+    hard histogram would discard.
+
+    The layer is used as the `trial_net` of `PermutationInvariantEmbedding`, whose
+    sum over the jump axis is what turns these per-delay responses into the
+    histogram of a trajectory. Seen that way the histogram is a DeepSets whose
+    per-delay network is fixed rather than learned, which is exactly the physical
+    knowledge the paper builds in: the time delays of a two-level system are
+    independent, so only their distribution carries information about the
+    parameters and their order carries none.
+
+    The bins are deliberately not trainable, as in the paper, so `nbins` and
+    `taumax` are hyperparameters rather than something the fit adjusts.
+    """
+
+    def __init__(self, nbins: int = 700, taumax: float = 100.0, factor: float = 20.0):
+        """
+        Args:
+            nbins (int): Number of bins, the paper's 700 by default. This is the
+                dimension the jump axis is pooled into, so it plays the role
+                `embedding_output_dim` plays for the learned DeepSets.
+            taumax (float): Upper edge of the binned range, in units of 1/gamma.
+                Delays beyond it excite no bin and are dropped.
+            factor (float): Sharpness of the sigmoids. The paper uses 20, which
+                for 700 bins over [0, 100] is comparable to the bin half-width,
+                so a delay meaningfully excites a few neighbouring bins.
+        """
+        super().__init__()
+        edges = torch.linspace(0.0, taumax, nbins + 1)
+        # A buffer rather than a plain attribute, so that `.to(device)` carries
+        # the centres along with the rest of the model.
+        self.register_buffer("centers", 0.5 * (edges[1:] + edges[:-1]))
+        self.nbins = int(nbins)
+        self.taumax = float(taumax)
+        self.width = float(edges[1] - edges[0])
+        self.factor = float(factor)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Bin responses of every delay.
+
+        Args:
+            x (torch.Tensor): Trajectories with an explicit trial axis, shape
+                (batch, njumps, 1).
+
+        Returns:
+            torch.Tensor: Shape (batch, njumps, nbins), summed over the jumps by
+            the enclosing `PermutationInvariantEmbedding`.
+        """
+        shifted = x - self.centers
+        half = self.width / 2
+        return torch.sigmoid((shifted + half) * self.factor) * torch.sigmoid(
+            (-shifted + half) * self.factor
+        )
+
+    def extra_repr(self) -> str:
+        return (
+            f"nbins={self.nbins}, taumax={self.taumax}, "
+            f"width={self.width:.4f}, factor={self.factor}, trainable=False"
+        )
+
+
 def build_embedding_net(
-    embedding: str, embedding_output_dim: int, hidden_features: int
+    embedding: str,
+    embedding_output_dim: int,
+    hidden_features: int,
+    hist_nbins: int = 700,
+    hist_taumax: float = 100.0,
 ) -> Optional[torch.nn.Module]:
     """Build the embedding network that summarises a trajectory before it is fed
     to the flow.
@@ -157,11 +240,20 @@ def build_embedding_net(
     one as `PermutationInvariantEmbedding`, which plays the role of the
     hand-written `DeepSet` module of the notebook.
 
+    Both summaries offered here are that same object and differ only in the
+    per-delay network it pools over: "deepset" learns it, while "hist" fixes it
+    to the histogram bins of the paper's `Hist-Dense` architecture.
+
     Args:
-        embedding (str): Either "none" (feed the raw trajectory to the flow) or
-            "deepset" (permutation-invariant summary).
-        embedding_output_dim (int): The dimension of the learned summary.
+        embedding (str): "none" (feed the raw trajectory to the flow), "deepset"
+            (learned permutation-invariant summary), or "hist" (the same pooling
+            over the paper's fixed histogram bins).
+        embedding_output_dim (int): The dimension of the summary handed to the
+            flow. For "deepset" it is also the per-delay latent dimension; for
+            "hist" that role is played by `hist_nbins` instead.
         hidden_features (int): Width of the hidden layers of the embedding.
+        hist_nbins (int): Number of histogram bins, only used by "hist".
+        hist_taumax (float): Upper edge of the binned range, only used by "hist".
 
     Returns:
         Optional[torch.nn.Module]: The embedding network, or None when the raw
@@ -169,20 +261,33 @@ def build_embedding_net(
     """
     if embedding == "none":
         return None
-    if embedding != "deepset":
-        raise ValueError(f"Unknown embedding '{embedding}', use 'none' or 'deepset'")
+    if embedding not in ("deepset", "hist"):
+        raise ValueError(
+            f"Unknown embedding '{embedding}', use 'none', 'deepset' or 'hist'"
+        )
 
-    # `trial_net` is applied to every single time delay (a scalar), its outputs
-    # are summed over the jump axis, and `rho` maps the sum to the summary.
-    trial_net = FCEmbedding(
-        input_dim=1,
-        num_hiddens=hidden_features,
-        num_layers=2,
-        output_dim=embedding_output_dim,
-    )
+    trial_net: torch.nn.Module
+    if embedding == "hist":
+        # Fixed bins instead of a learned per-delay network. The pooling and the
+        # dense head below are unchanged, so this is the paper's Hist-Dense with
+        # its regression head replaced by the flow.
+        trial_net = HistogramBins(hist_nbins, hist_taumax)
+        trial_net_output_dim = hist_nbins
+    else:
+        # `trial_net` is applied to every single time delay (a scalar), its
+        # outputs are summed over the jump axis, and `rho` maps the sum to the
+        # summary.
+        trial_net = FCEmbedding(
+            input_dim=1,
+            num_hiddens=hidden_features,
+            num_layers=2,
+            output_dim=embedding_output_dim,
+        )
+        trial_net_output_dim = embedding_output_dim
+
     return PermutationInvariantEmbedding(
         trial_net,
-        trial_net_output_dim=embedding_output_dim,
+        trial_net_output_dim=trial_net_output_dim,
         aggregation_fn="sum",
         num_hiddens=hidden_features,
         num_layers=2,
@@ -248,11 +353,11 @@ def prepare_x(taus: np.ndarray, embedding: str) -> torch.Tensor:
 
     Returns:
         torch.Tensor: Shape (num_pairs, njumps) without an embedding, and
-        (num_pairs, njumps, 1) with the permutation-invariant one, which expects
-        an explicit trial axis.
+        (num_pairs, njumps, 1) with either permutation-invariant one, which
+        expects an explicit trial axis.
     """
     x = torch.as_tensor(taus, dtype=torch.float32)
-    if embedding == "deepset":
+    if embedding in ("deepset", "hist"):
         x = x.unsqueeze(-1)
     return x
 
@@ -556,6 +661,8 @@ def main(
     hidden_features: int = 128,
     num_transforms: int = 3,
     embedding_output_dim: int = 16,
+    hist_nbins: int = 700,
+    hist_taumax: float = 100.0,
     z_score_x: str = "structured",
     training_batch_size: int = 256,
     learning_rate: float = 1e-3,
@@ -582,12 +689,20 @@ def main(
         obs_index (int): Index of the pair used as the example observation. It
             must fall outside the training and diagnostic slices.
         model (str): Flow family for q(theta|x), e.g. "zuko_maf" or "zuko_nsf".
-        embedding (str): "none" or "deepset" (permutation-invariant summary).
+        embedding (str): "none", "deepset" (learned permutation-invariant
+            summary) or "hist" (the same pooling over the paper's fixed
+            histogram bins). "hist" forces z_score_x="none", see below.
         hidden_features (int): Width of the hidden layers of the flow.
         num_transforms (int): Number of autoregressive transforms of the flow.
-        embedding_output_dim (int): Dimension of the learned trajectory summary.
+        embedding_output_dim (int): Dimension of the trajectory summary handed
+            to the flow.
+        hist_nbins (int): Number of histogram bins for embedding="hist". The
+            paper's value is 700.
+        hist_taumax (float): Upper edge of the binned range for
+            embedding="hist", in units of 1/gamma. The paper's value is 100.
         z_score_x (str): Standardisation of the trajectories, one of
-            "structured", "independent" or "none".
+            "structured", "independent" or "none". Ignored for
+            embedding="hist", which needs the delays in physical units.
         training_batch_size (int): Mini-batch size during training.
         learning_rate (float): Adam learning rate.
         validation_fraction (float): Fraction of pairs held out for validation.
@@ -649,8 +764,20 @@ def main(
 
     # --- Train the NPE -------------------------------------------------------
     prior = build_prior(device=device)
+    # The histogram bins sit at fixed positions in physical units of tau, but
+    # `sbi` standardises x *before* the embedding -- it builds the conditioning
+    # path as `nn.Sequential(standardizing_net, embedding_net)`. Z-scoring would
+    # therefore hand the bins values they were never meant to see: most of a
+    # trajectory would land outside every bin and be silently dropped.
+    if embedding == "hist" and z_score_x != "none":
+        print(
+            f"embedding='hist' needs the raw time delays: overriding "
+            f"z_score_x='{z_score_x}' with 'none'"
+        )
+        z_score_x = "none"
+
     embedding_net = build_embedding_net(
-        embedding, embedding_output_dim, hidden_features
+        embedding, embedding_output_dim, hidden_features, hist_nbins, hist_taumax
     )
     density_estimator = build_density_estimator(
         model, hidden_features, num_transforms, embedding_net, prior, z_score_x
@@ -681,6 +808,8 @@ def main(
             "hidden_features": hidden_features,
             "num_transforms": num_transforms,
             "embedding_output_dim": embedding_output_dim,
+            "hist_nbins": hist_nbins if embedding == "hist" else None,
+            "hist_taumax": hist_taumax if embedding == "hist" else None,
             "z_score_x": z_score_x,
             "training_batch_size": training_batch_size,
             "learning_rate": learning_rate,
