@@ -17,3 +17,4 @@ paramest_nn.egg-info
 *.svg
 *.pkl
 notebooks/3-Results-reply.ipynb
+sbi-logs/

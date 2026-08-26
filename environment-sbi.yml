@@ -1,0 +1,34 @@
+# Environment for the simulation-based inference part of the repository:
+# the notebook `notebooks/4-NPE.ipynb` and the script `scripts/npe_2d_sbi.py`.
+#
+# It is kept separate from `environment.yml` on purpose. `sbi` 0.27 requires
+# Python 3.10 or newer, while the main environment pins Python 3.9 for
+# TensorFlow and `qutip` 4, so the two cannot live in the same environment
+# without porting the rest of the code first.
+#
+#   conda env create -f environment-sbi.yml
+#   conda activate torch-sbi
+#
+# Nothing here depends on `paramest_nn`, except the optional posterior
+# predictive check of the script (`--run_ppc`), which calls the `qutip`
+# simulator and therefore needs the main environment instead.
+name: torch-sbi
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - jupyter
+  - matplotlib
+  - numpy
+  # `torch` comes from pip and bundles its own copy of the OpenMP runtime. The
+  # default `libopenblas` of conda-forge is built against `llvm-openmp` and
+  # pulls in a second one, and loading both aborts the process with
+  # "OMP: Error #15: Initializing libomp.dylib, but found libomp.dylib already
+  # initialized". The pthreads build of OpenBLAS needs no OpenMP runtime, which
+  # leaves `torch`'s as the only one in the environment.
+  - libopenblas=*=pthreads*
+  - pip
+  - pip:
+    - torch
+    - sbi>=0.27
+    - fire

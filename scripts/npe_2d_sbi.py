@@ -1,0 +1,891 @@
+"""
+Neural Posterior Estimation (NPE) on photon-counting trajectories for the 2D
+parameter space (Delta, Omega), written directly against the `sbi` package.
+
+This script is the command line version of the notebook `notebooks/4-NPE.ipynb`.
+
+`--embedding=hist` is the `Hist-Dense` architecture of the paper carried over to
+the posterior: its histogram layer becomes the fixed per-delay network of the
+same `PermutationInvariantEmbedding`, whose sum over the jump axis is the
+histogram, and the flow takes the place of the dense regression head. It needs
+the delays in physical units, so it forces `z_score_x="none"`.
+
+`--embedding=cnn` instead reads the 48 delays as a time series and runs `sbi`'s
+`CNNEmbedding` over them. It is the one summary here that is not permutation
+invariant, which for this system is a mismatch rather than a feature -- the
+delays are independent, so their order carries nothing -- and it is included as
+the control that measures what that mismatch costs.
+
+The training pairs are the ones produced by `1-Trajectories_generation.ipynb` and
+distributed on Zenodo: `param_rand_list-2D.npy` holds parameters drawn from a
+uniform prior, `taus-2D.npy` holds one simulated trajectory of `njumps` time
+delays for each parameter pair. Because those pairs are exactly
+(prior draw, prior predictive) samples, a held-out slice of them can be reused
+directly for SBC, expected coverage and TARP without running the simulator again.
+
+Usage
+-----
+    python scripts/npe_2d_sbi.py --help
+    python scripts/npe_2d_sbi.py --num_train=512000 --max_num_epochs=50
+    python scripts/npe_2d_sbi.py --embedding=deepset --model=zuko_nsf \
+        --hidden_features=64 --max_num_epochs=15
+    python scripts/npe_2d_sbi.py --embedding=hist --max_num_epochs=50
+    python scripts/npe_2d_sbi.py --embedding=cnn --max_num_epochs=50
+
+Outputs (figures, the trained posterior and a JSON summary) are written to
+`--outdir`, which defaults to `data/models/npe-sbi-2D/`.
+"""
+
+import json
+import pickle
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import matplotlib
+
+matplotlib.use("Agg")  # the script is meant to run headless, e.g. on a cluster
+
+import fire  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
+from sbi.analysis import pairplot, plot_tarp, sbc_rank_plot  # noqa: E402
+from sbi.diagnostics import check_sbc, check_tarp, run_sbc, run_tarp  # noqa: E402
+from sbi.inference import NPE  # noqa: E402
+from sbi.neural_nets import posterior_nn  # noqa: E402
+from sbi.neural_nets.embedding_nets import (  # noqa: E402
+    CNNEmbedding,
+    FCEmbedding,
+    PermutationInvariantEmbedding,
+)
+from sbi.utils import BoxUniform  # noqa: E402
+
+# Parameter names and plotting labels, in the order used in the data files
+PARAMETERS = ["delta", "omega"]
+LABELS = [r"$\Delta$", r"$\Omega$"]
+
+# Physical parameter ranges used to generate the training data (the prior).
+# The detuning delta lives in [0, 3] and the drive frequency omega in [0.25, 5].
+DELTA_MIN, DELTA_MAX = 0.0, 3.0
+OMEGA_MIN, OMEGA_MAX = 0.25, 5.0
+
+# Relative paths of the training data inside `datapath`
+PARAMS_FILE = "2D-delta-omega/param_rand_list-2D.npy"
+TAUS_FILE = "2D-delta-omega/taus-2D.npy"
+
+# Density estimators that can map a bounded theta to an unconstrained space,
+# which keeps the flow from putting posterior mass outside the prior box and so
+# removes the need to reject the samples that leak out of it.
+UNCONSTRAINED_OK = ("mdn", "zuko_")
+
+
+#############
+#  GET DATA #
+#############
+def get_training_pairs(datapath: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Load the (parameters, trajectories) pairs used to train the NPE.
+
+    Args:
+        datapath (str): The root folder holding the downloaded Zenodo data.
+
+    Returns:
+        tuple(np.ndarray, np.ndarray): A tuple of 2 arrays (params, taus);
+        the parameters first, with shape (num_pairs, 2), and the trajectories
+        second, with shape (num_pairs, njumps).
+    """
+    fp = Path(datapath) / PARAMS_FILE
+    ft = Path(datapath) / TAUS_FILE
+    assert fp.is_file(), f"File not found {fp}"
+    assert ft.is_file(), f"File not found {ft}"
+    params = np.load(fp)
+    taus = np.load(ft)
+    assert len(params) == len(taus), "params and taus must have the same length"
+    return params, taus
+
+
+def plot_training_data(params: np.ndarray, taus: np.ndarray, outdir: Path) -> None:
+    """Reproduce the exploratory plots of the notebook: a scatter plot of the
+    sampled parameters, a few trajectories, and the histogram of a single one.
+
+    Args:
+        params (np.ndarray): The array of parameter pairs.
+        taus (np.ndarray): The array of trajectories.
+        outdir (Path): Where the figures are written.
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.0))
+
+    axes[0].scatter(params[:1000, 0], params[:1000, 1], s=4)
+    axes[0].set(xlabel=LABELS[0], ylabel=LABELS[1], title="Params scatter plot")
+
+    for element in taus[:3]:
+        axes[1].plot(element)
+    axes[1].set(xlabel="Jump index", ylabel=r"$\tau$", title="3 trajectories")
+
+    axes[2].hist(taus[0], bins=5)
+    axes[2].set(xlabel=r"$\tau$", ylabel="Frequency", title="Single trajectory")
+
+    fig.tight_layout()
+    fig.savefig(outdir / "training_data.png", dpi=150)
+    plt.close(fig)
+
+
+############################
+#  PRIOR AND NEURAL NETWORK #
+############################
+def build_prior(device: str = "cpu") -> BoxUniform:
+    """Build the uniform prior over (delta, omega) used to generate the data.
+
+    Args:
+        device (str): The torch device the prior lives on.
+
+    Returns:
+        BoxUniform: The 2D uniform prior.
+    """
+    return BoxUniform(
+        low=torch.tensor([DELTA_MIN, OMEGA_MIN]),
+        high=torch.tensor([DELTA_MAX, OMEGA_MAX]),
+        device=device,
+    )
+
+
+class HistogramBins(torch.nn.Module):
+    """A fixed bank of soft histogram bins, applied to one time delay at a time.
+
+    This is the first layer of the `Hist-Dense` architecture of the paper, ported
+    from `paramest_nn.custom_layers.MyHistogramLayer_Sigmoid`. Bin `b`, centred on
+    `c_b`, responds to a delay `tau` with
+
+        sigmoid((tau - c_b + w/2) * f) * sigmoid((-(tau - c_b) + w/2) * f)
+
+    for a bin width `w` and a sharpness `f`. Finite `f` makes the bins soft and
+    overlapping, so the counts are not integers; it also means the position of a
+    delay inside its bin survives in how it splits between neighbours, which a
+    hard histogram would discard.
+
+    The layer is used as the `trial_net` of `PermutationInvariantEmbedding`, whose
+    sum over the jump axis is what turns these per-delay responses into the
+    histogram of a trajectory. Seen that way the histogram is a DeepSets whose
+    per-delay network is fixed rather than learned, which is exactly the physical
+    knowledge the paper builds in: the time delays of a two-level system are
+    independent, so only their distribution carries information about the
+    parameters and their order carries none.
+
+    The bins are deliberately not trainable, as in the paper, so `nbins` and
+    `taumax` are hyperparameters rather than something the fit adjusts.
+    """
+
+    def __init__(self, nbins: int = 700, taumax: float = 100.0, factor: float = 20.0):
+        """
+        Args:
+            nbins (int): Number of bins, the paper's 700 by default. This is the
+                dimension the jump axis is pooled into, so it plays the role
+                `embedding_output_dim` plays for the learned DeepSets.
+            taumax (float): Upper edge of the binned range, in units of 1/gamma.
+                Delays beyond it excite no bin and are dropped.
+            factor (float): Sharpness of the sigmoids. The paper uses 20, which
+                for 700 bins over [0, 100] is comparable to the bin half-width,
+                so a delay meaningfully excites a few neighbouring bins.
+        """
+        super().__init__()
+        edges = torch.linspace(0.0, taumax, nbins + 1)
+        # A buffer rather than a plain attribute, so that `.to(device)` carries
+        # the centres along with the rest of the model.
+        self.register_buffer("centers", 0.5 * (edges[1:] + edges[:-1]))
+        self.nbins = int(nbins)
+        self.taumax = float(taumax)
+        self.width = float(edges[1] - edges[0])
+        self.factor = float(factor)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Bin responses of every delay.
+
+        Args:
+            x (torch.Tensor): Trajectories with an explicit trial axis, shape
+                (batch, njumps, 1).
+
+        Returns:
+            torch.Tensor: Shape (batch, njumps, nbins), summed over the jumps by
+            the enclosing `PermutationInvariantEmbedding`.
+        """
+        shifted = x - self.centers
+        half = self.width / 2
+        return torch.sigmoid((shifted + half) * self.factor) * torch.sigmoid(
+            (-shifted + half) * self.factor
+        )
+
+    def extra_repr(self) -> str:
+        return (
+            f"nbins={self.nbins}, taumax={self.taumax}, "
+            f"width={self.width:.4f}, factor={self.factor}, trainable=False"
+        )
+
+
+def build_embedding_net(
+    embedding: str,
+    embedding_output_dim: int,
+    hidden_features: int,
+    hist_nbins: int = 700,
+    hist_taumax: float = 100.0,
+    njumps: int = 48,
+    cnn_kernel_size: int = 5,
+) -> Optional[torch.nn.Module]:
+    """Build the embedding network that summarises a trajectory before it is fed
+    to the flow.
+
+    A trajectory is a set of time delays whose order carries no information, so
+    the natural choice is a permutation-invariant (DeepSets) summary: `sbi` ships
+    one as `PermutationInvariantEmbedding`.
+
+    Two of the summaries offered here are that same object and differ only in
+    the per-delay network it pools over: "deepset" learns it, while "hist" fixes
+    it to the histogram bins of the paper's `Hist-Dense` architecture.
+
+    "cnn" is the odd one out. It reads the 48 time delays as a *time series* and
+    slides 1D convolutions along them, so unlike the two above it is not
+    permutation invariant and can in principle use the order of the jumps. For
+    this system that order carries no information -- the two-level system
+    collapses to its ground state after every emission, so the delays are
+    independent -- which makes this a useful control rather than a physically
+    motivated choice: it measures what a model pays for not being told that the
+    delays are exchangeable. The paper makes the same point about its recurrent
+    architecture, which performed well despite the same mismatch.
+
+    Args:
+        embedding (str): "none" (feed the raw trajectory to the flow), "deepset"
+            (learned permutation-invariant summary), "hist" (the same pooling
+            over the paper's fixed histogram bins), or "cnn" (1D convolutions
+            over the trajectory read as a time series).
+        embedding_output_dim (int): The dimension of the summary handed to the
+            flow. For "deepset" it is also the per-delay latent dimension; for
+            "hist" that role is played by `hist_nbins` instead.
+        hidden_features (int): Width of the hidden layers of the embedding.
+        hist_nbins (int): Number of histogram bins, only used by "hist".
+        hist_taumax (float): Upper edge of the binned range, only used by "hist".
+        njumps (int): Length of a trajectory, only used by "cnn", which needs the
+            input length up front to size its fully connected layers.
+        cnn_kernel_size (int): Width of the convolution kernels, only used by
+            "cnn". With the default two convolutions and pooling by two, a
+            trajectory of 48 delays is reduced to 12 positions.
+
+    Returns:
+        Optional[torch.nn.Module]: The embedding network, or None when the raw
+        trajectory is used as-is.
+    """
+    if embedding == "none":
+        return None
+    if embedding not in ("deepset", "hist", "cnn"):
+        raise ValueError(
+            f"Unknown embedding '{embedding}', use 'none', 'deepset', 'hist' "
+            f"or 'cnn'"
+        )
+
+    if embedding == "cnn":
+        # `input_shape=(L,)` is what selects Conv1d over Conv2d; the channel axis
+        # is added by the module itself, so the trajectories are fed as
+        # (num_pairs, njumps) with no trial axis, unlike the two summaries below.
+        return CNNEmbedding(
+            input_shape=(njumps,),
+            output_dim=embedding_output_dim,
+            num_linear_units=hidden_features,
+            kernel_size=cnn_kernel_size,
+        )
+
+    trial_net: torch.nn.Module
+    if embedding == "hist":
+        # Fixed bins instead of a learned per-delay network. The pooling and the
+        # dense head below are unchanged, so this is the paper's Hist-Dense with
+        # its regression head replaced by the flow.
+        trial_net = HistogramBins(hist_nbins, hist_taumax)
+        trial_net_output_dim = hist_nbins
+    else:
+        # `trial_net` is applied to every single time delay (a scalar), its
+        # outputs are summed over the jump axis, and `rho` maps the sum to the
+        # summary.
+        trial_net = FCEmbedding(
+            input_dim=1,
+            num_hiddens=hidden_features,
+            num_layers=2,
+            output_dim=embedding_output_dim,
+        )
+        trial_net_output_dim = embedding_output_dim
+
+    return PermutationInvariantEmbedding(
+        trial_net,
+        trial_net_output_dim=trial_net_output_dim,
+        aggregation_fn="sum",
+        num_hiddens=hidden_features,
+        num_layers=2,
+        output_dim=embedding_output_dim,
+    )
+
+
+def build_density_estimator(
+    model: str,
+    hidden_features: int,
+    num_transforms: int,
+    embedding_net: Optional[torch.nn.Module],
+    prior: BoxUniform,
+    z_score_x: str = "structured",
+) -> Any:
+    """Build the conditional density estimator q(theta|x) for the NPE.
+
+    Args:
+        model (str): The flow family, e.g. "zuko_maf" (the notebook default is a
+            MAF), "zuko_nsf", "maf" or "nsf".
+        hidden_features (int): Width of the hidden layers of the flow.
+        num_transforms (int): Number of autoregressive transforms of the flow.
+        embedding_net (Optional[torch.nn.Module]): The summary network, if any.
+        prior (BoxUniform): The prior, whose bounds define the transformation of
+            theta to an unconstrained space.
+        z_score_x (str): How to standardise the trajectories. "structured" shares
+            one mean and std across the jumps, which is the natural choice here
+            because every entry of a trajectory is the same physical quantity;
+            "independent" standardises each jump separately, and "none" leaves
+            the trajectory untouched, which is what embedding="hist" needs.
+
+    Returns:
+        Callable: The density estimator builder consumed by `NPE`.
+    """
+    # theta is bounded by the prior box, so it is rescaled before the flow sees
+    # it. For the zuko/mdn backends `sbi` can map it to an unconstrained space
+    # rather than merely standardising it, which additionally prevents the
+    # posterior from leaking outside the prior.
+    kwargs: Dict[str, Any] = {
+        "model": model,
+        "hidden_features": hidden_features,
+        "num_transforms": num_transforms,
+        "z_score_x": z_score_x,
+    }
+    if model.startswith(UNCONSTRAINED_OK):
+        kwargs["z_score_theta"] = "transform_to_unconstrained"
+        # `x_dist` names the distribution whose support bounds theta; for NPE
+        # that is the prior. Without it the transform has no bounds to use.
+        kwargs["x_dist"] = prior
+    else:
+        kwargs["z_score_theta"] = "independent"
+    if embedding_net is not None:
+        kwargs["embedding_net"] = embedding_net
+    return posterior_nn(**kwargs)
+
+
+def prepare_x(taus: np.ndarray, embedding: str) -> torch.Tensor:
+    """Convert trajectories to the tensor shape expected by `sbi`.
+
+    Args:
+        taus (np.ndarray): Trajectories with shape (num_pairs, njumps).
+        embedding (str): The embedding choice, see `build_embedding_net`.
+
+    Returns:
+        torch.Tensor: Shape (num_pairs, njumps) for "none" and for "cnn", which
+        reads the trajectory as a series and adds its own channel axis, and
+        (num_pairs, njumps, 1) for the two permutation-invariant summaries,
+        which expect an explicit trial axis.
+    """
+    x = torch.as_tensor(taus, dtype=torch.float32)
+    if embedding in ("deepset", "hist"):
+        x = x.unsqueeze(-1)
+    return x
+
+
+#############
+#  TRAINING #
+#############
+def train_npe(
+    theta: torch.Tensor,
+    x: torch.Tensor,
+    prior: BoxUniform,
+    density_estimator: Any,
+    device: str,
+    training_batch_size: int,
+    learning_rate: float,
+    validation_fraction: float,
+    stop_after_epochs: int,
+    max_num_epochs: int,
+) -> Tuple[NPE, Any]:
+    """Train the NPE on the simulated pairs.
+
+    `NPE.train` runs the whole optimisation, including the train/validation
+    split, the gradient clipping and early stopping on the validation loss.
+
+    Args:
+        theta (torch.Tensor): Parameters, shape (num_pairs, 2).
+        x (torch.Tensor): Trajectories, see `prepare_x`.
+        prior (BoxUniform): The prior over the parameters.
+        density_estimator (Callable): The estimator builder.
+        device (str): Torch device used for training.
+        training_batch_size (int): Mini-batch size.
+        learning_rate (float): Adam learning rate.
+        validation_fraction (float): Fraction of the pairs held out for
+            validation during training.
+        stop_after_epochs (int): Early stopping patience, in epochs.
+        max_num_epochs (int): Hard cap on the number of epochs.
+
+    Returns:
+        tuple(NPE, Any): The trainer and the trained density estimator.
+    """
+    trainer = NPE(prior=prior, density_estimator=density_estimator, device=device)
+    trainer.append_simulations(theta, x)
+    estimator = trainer.train(
+        training_batch_size=training_batch_size,
+        learning_rate=learning_rate,
+        validation_fraction=validation_fraction,
+        stop_after_epochs=stop_after_epochs,
+        max_num_epochs=max_num_epochs,
+        clip_max_norm=1.0,  # gradient clipping, as in the notebook
+        show_train_summary=True,
+    )
+    return trainer, estimator
+
+
+####################
+#  QUICK EVALUATION #
+####################
+def evaluate_observation(
+    posterior: Any,
+    theta_star: torch.Tensor,
+    x_star: torch.Tensor,
+    num_posterior_samples: int,
+    outdir: Path,
+) -> Dict[str, List[float]]:
+    """Sample the posterior at a held-out observation and plot it against the
+    ground truth.
+
+    Args:
+        posterior (Any): The trained posterior.
+        theta_star (torch.Tensor): The true parameters, shape (2,).
+        x_star (torch.Tensor): The observed trajectory, shape (njumps,) or
+            (njumps, 1) when the permutation-invariant embedding is used.
+        num_posterior_samples (int): Number of posterior samples to draw.
+        outdir (Path): Where the figure is written.
+
+    Returns:
+        dict: Posterior mean, standard deviation and the ground truth.
+    """
+    samples = posterior.sample((num_posterior_samples,), x=x_star)
+    samples = samples.detach().cpu()
+    # `pairplot` converts what it is given with `.numpy()`, which only works for
+    # tensors that are already on the host.
+    theta_star = theta_star.detach().cpu()
+
+    limits = [[DELTA_MIN, DELTA_MAX], [OMEGA_MIN, OMEGA_MAX]]
+    fig, _ = pairplot(
+        samples,
+        points=theta_star.reshape(1, -1),
+        limits=limits,
+        labels=LABELS,
+        upper="contour",
+        diag="kde",
+        figsize=(5.0, 5.0),
+    )
+    fig.suptitle(r"$p_\phi(\theta \mid x^*)$")
+    fig.savefig(outdir / "posterior_observation.png", dpi=150)
+    plt.close(fig)
+
+    return {
+        "true": theta_star.tolist(),
+        "posterior_mean": samples.mean(dim=0).tolist(),
+        "posterior_std": samples.std(dim=0).tolist(),
+    }
+
+
+################
+#  DIAGNOSTICS #
+################
+def run_diagnostics(
+    posterior: Any,
+    thetas: torch.Tensor,
+    xs: torch.Tensor,
+    num_posterior_samples: int,
+    outdir: Path,
+) -> Dict[str, Any]:
+    """Check that the samples really are the posterior.
+
+    Three complementary checks are run on held-out (theta, x) pairs, which are
+    prior draws and prior predictives by construction:
+
+    * SBC on the marginals: is each parameter's posterior too narrow or too wide
+      on average? A flat rank histogram cannot be rejected.
+    * Expected coverage: the same machinery applied to the joint log-probability,
+      which also catches errors in the correlation between the parameters that
+      the per-parameter histograms cannot. In the CDF plot, below the diagonal
+      means over-confident.
+    * TARP: a necessary and sufficient check of posterior correctness, read like
+      SBC when the default (uniform) references are used.
+
+    Args:
+        posterior (Any): The trained posterior.
+        thetas (torch.Tensor): Held-out parameters, shape (num_pairs, 2).
+        xs (torch.Tensor): Held-out trajectories, see `prepare_x`.
+        num_posterior_samples (int): Posterior samples drawn per held-out pair.
+        outdir (Path): Where the figures are written.
+
+    Returns:
+        dict: The numerical summaries of the three checks.
+    """
+    results: Dict[str, Any] = {"num_diagnostic_pairs": int(thetas.shape[0])}
+
+    # --- SBC on the marginals ------------------------------------------------
+    # `run_sbc` samples the posterior, so `thetas` and `xs` have to be on its
+    # device; its outputs come back on that device and are moved to the host
+    # here, because `check_sbc` and the plots go through numpy.
+    ranks, dap_samples = run_sbc(
+        thetas, xs, posterior, num_posterior_samples=num_posterior_samples
+    )
+    ranks, dap_samples = ranks.cpu(), dap_samples.cpu()
+    stats = check_sbc(
+        ranks, thetas.cpu(), dap_samples, num_posterior_samples=num_posterior_samples
+    )
+    results["sbc"] = {k: np.asarray(v).tolist() for k, v in stats.items()}
+    fig, _ = sbc_rank_plot(
+        ranks,
+        num_posterior_samples,
+        plot_type="hist",
+        num_bins=20,
+        parameter_labels=LABELS,
+    )
+    fig.savefig(outdir / "sbc_rank_histogram.png", dpi=150)
+    plt.close(fig)
+
+    # --- Expected coverage (ranks of the joint log-probability) --------------
+    cov_ranks, _ = run_sbc(
+        thetas,
+        xs,
+        posterior,
+        num_posterior_samples=num_posterior_samples,
+        reduce_fns=posterior.log_prob,
+    )
+    cov_ranks = cov_ranks.cpu()
+    fig, _ = sbc_rank_plot(
+        cov_ranks,
+        num_posterior_samples,
+        plot_type="cdf",
+        num_bins=20,
+        parameter_labels=[r"$\log p_\phi(\theta \mid x)$"],
+    )
+    fig.savefig(outdir / "expected_coverage.png", dpi=150)
+    plt.close(fig)
+
+    # --- TARP ----------------------------------------------------------------
+    ecp, alpha = run_tarp(
+        thetas, xs, posterior, num_posterior_samples=num_posterior_samples
+    )
+    ecp, alpha = ecp.cpu(), alpha.cpu()
+    atc, ks_pval = check_tarp(ecp, alpha)
+    results["tarp"] = {"atc": float(atc), "ks_pval": float(ks_pval)}
+    fig, _ = plot_tarp(ecp, alpha)
+    fig.savefig(outdir / "tarp.png", dpi=150)
+    plt.close(fig)
+
+    return results
+
+
+def posterior_predictive_check(
+    posterior: Any,
+    x_star: torch.Tensor,
+    num_simulations: int,
+    njumps: int,
+    outdir: Path,
+    seed: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Push posterior samples back through the quantum trajectory simulator and
+    check that the observed trajectory is not an outlier of the resulting cloud.
+
+    This is the one check that can tell whether the simulator can produce the
+    observation at all, which no calibration check sees. It needs `qutip`, so the
+    import is local and the check is opt-in through `--run_ppc`.
+
+    Args:
+        posterior (Any): The trained posterior.
+        x_star (torch.Tensor): The observed trajectory.
+        num_simulations (int): Number of posterior draws to re-simulate. The
+            simulator is slow, so this is deliberately small.
+        njumps (int): Number of time delays per simulated trajectory.
+        outdir (Path): Where the figure is written.
+        seed (Optional[int]): Seed for the simulator.
+
+    Returns:
+        dict: The observed and predicted summary statistics.
+    """
+    from paramest_nn.quantum_tools import generate_clicks_TLS
+
+    if seed is not None:
+        np.random.seed(seed)
+
+    theta_pp = posterior.sample((num_simulations,), x=x_star).detach().cpu().numpy()
+    x_pp = np.stack([generate_clicks_TLS(theta, njumpsMC=njumps) for theta in theta_pp])
+
+    taus_obs = x_star.detach().cpu().numpy().reshape(-1)
+    stats_obs = np.array([taus_obs.mean(), taus_obs.std()])
+    stats_pp = np.stack([x_pp.mean(axis=1), x_pp.std(axis=1)], axis=1)
+
+    # The time delays are heavy tailed, so compare them on a logarithmic axis.
+    pooled = np.concatenate([x_pp.reshape(-1), taus_obs])
+    bins = np.logspace(np.log10(pooled.min()), np.log10(pooled.max()), 40)
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 4.0))
+    axes[0].hist(
+        x_pp.reshape(-1), bins=bins, density=True, alpha=0.6, label="predictive"
+    )
+    axes[0].hist(taus_obs, bins=bins, density=True, histtype="step", label=r"$x^*$")
+    axes[0].set(
+        xlabel=r"$\tau$", ylabel="density", title="Pooled time delays", xscale="log"
+    )
+    axes[0].legend()
+
+    axes[1].scatter(stats_pp[:, 0], stats_pp[:, 1], s=12, alpha=0.6, label="predictive")
+    axes[1].scatter(*stats_obs, marker="*", s=180, color="red", label=r"$x^*$")
+    axes[1].set(
+        xlabel=r"mean $\tau$",
+        ylabel=r"std $\tau$",
+        title="Summary statistics",
+        xscale="log",
+        yscale="log",
+    )
+    axes[1].legend()
+
+    fig.tight_layout()
+    fig.savefig(outdir / "posterior_predictive_check.png", dpi=150)
+    plt.close(fig)
+
+    return {
+        "observed_summary": stats_obs.tolist(),
+        "predictive_summary_mean": stats_pp.mean(axis=0).tolist(),
+        "predictive_summary_std": stats_pp.std(axis=0).tolist(),
+    }
+
+
+def resolve_device(device: str) -> str:
+    """Turn "auto" into the best device available on this machine.
+
+    Args:
+        device (str): "auto", "cpu", "cuda" or "mps".
+
+    Returns:
+        str: The device string handed to `sbi`.
+    """
+    if device != "auto":
+        return device
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+#############
+#  MAIN     #
+#############
+def main(
+    datapath: str = "data/training-trajectories/",
+    outdir: str = "data/models/npe-sbi-2D/",
+    num_train: int = 512_000,
+    num_diagnostic: int = 256,
+    obs_index: int = 1_000_000,
+    model: str = "zuko_nsf",
+    embedding: str = "none",
+    hidden_features: int = 128,
+    num_transforms: int = 3,
+    embedding_output_dim: int = 16,
+    hist_nbins: int = 700,
+    hist_taumax: float = 100.0,
+    cnn_kernel_size: int = 5,
+    z_score_x: str = "structured",
+    training_batch_size: int = 256,
+    learning_rate: float = 1e-3,
+    validation_fraction: float = 0.1,
+    stop_after_epochs: int = 20,
+    max_num_epochs: int = 50,
+    num_posterior_samples: int = 2**14,
+    num_diagnostic_samples: int = 1000,
+    device: str = "auto",
+    seed: int = 0,
+    plot_data: bool = True,
+    run_ppc: bool = False,
+    num_ppc_simulations: int = 50,
+) -> None:
+    """Train and validate an amortized NPE posterior over (Delta, Omega) with
+    the `sbi` package, following the steps of `notebooks/4-NPE.ipynb`.
+
+    Args:
+        datapath (str): Root folder holding the downloaded training data.
+        outdir (str): Folder where figures, the posterior and the summary go.
+        num_train (int): Number of (theta, x) pairs used for training.
+        num_diagnostic (int): Number of held-out pairs used for SBC, expected
+            coverage and TARP. A few hundred is the usual budget.
+        obs_index (int): Index of the pair used as the example observation. It
+            must fall outside the training and diagnostic slices.
+        model (str): Flow family for q(theta|x), e.g. "zuko_maf" or "zuko_nsf".
+        embedding (str): "none", "deepset" (learned permutation-invariant
+            summary), "hist" (the same pooling over the paper's fixed histogram
+            bins) or "cnn" (1D convolutions over the trajectory read as a time
+            series). "hist" forces z_score_x="none", see below.
+        hidden_features (int): Width of the hidden layers of the flow.
+        num_transforms (int): Number of autoregressive transforms of the flow.
+        embedding_output_dim (int): Dimension of the trajectory summary handed
+            to the flow.
+        hist_nbins (int): Number of histogram bins for embedding="hist". The
+            paper's value is 700.
+        hist_taumax (float): Upper edge of the binned range for
+            embedding="hist", in units of 1/gamma. The paper's value is 100.
+        cnn_kernel_size (int): Convolution kernel width for embedding="cnn".
+        z_score_x (str): Standardisation of the trajectories, one of
+            "structured", "independent" or "none". Ignored for
+            embedding="hist", which needs the delays in physical units.
+        training_batch_size (int): Mini-batch size during training.
+        learning_rate (float): Adam learning rate.
+        validation_fraction (float): Fraction of pairs held out for validation.
+        stop_after_epochs (int): Early stopping patience, in epochs.
+        max_num_epochs (int): Hard cap on the number of training epochs.
+        num_posterior_samples (int): Samples drawn at the example observation.
+        num_diagnostic_samples (int): Posterior samples per diagnostic pair.
+        device (str): "auto", "cpu", "cuda" or "mps".
+        seed (int): Seed for torch and numpy.
+        plot_data (bool): Whether to write the exploratory data figure.
+        run_ppc (bool): Whether to run the posterior predictive check, which
+            re-runs the `qutip` simulator and is therefore slow.
+        num_ppc_simulations (int): Posterior draws re-simulated for the check.
+    """
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+    out = Path(outdir)
+    out.mkdir(parents=True, exist_ok=True)
+    device = resolve_device(device)
+    print(f"Running on device: {device}")
+
+    # --- Read training data --------------------------------------------------
+    params, taus = get_training_pairs(datapath)
+    njumps = taus.shape[-1]
+    print(f"We have {len(params)} trajectories of {njumps} jumps")
+    print(f"Parameter ranges: min={params.min(axis=0)}, max={params.max(axis=0)}")
+
+    if plot_data:
+        plot_training_data(params, taus, out)
+
+    # The three slices below must not overlap: training, diagnostics, and the
+    # single example observation.
+    assert num_train + num_diagnostic <= len(params), (
+        f"num_train + num_diagnostic = {num_train + num_diagnostic} exceeds the "
+        f"{len(params)} available pairs"
+    )
+    assert obs_index >= num_train + num_diagnostic, (
+        f"obs_index={obs_index} falls inside the training or diagnostic slice; "
+        f"pick an index >= {num_train + num_diagnostic}"
+    )
+    assert obs_index < len(params), f"obs_index={obs_index} is out of range"
+
+    # The training pairs stay on the CPU: `train` moves them across one
+    # mini-batch at a time, so keeping the whole set on the accelerator would
+    # only waste its memory.
+    theta_train = torch.as_tensor(params[:num_train], dtype=torch.float32)
+    x_train = prepare_x(taus[:num_train], embedding)
+
+    # Everything handed to the *trained* posterior does have to live on its
+    # device: `sbi` only moves `x` for the observation set with `set_default_x`,
+    # and leaves a tensor passed straight to `sample(x=...)` where it is.
+    diag_slice = slice(num_train, num_train + num_diagnostic)
+    theta_diag = torch.as_tensor(params[diag_slice], dtype=torch.float32).to(device)
+    x_diag = prepare_x(taus[diag_slice], embedding).to(device)
+
+    theta_star = torch.as_tensor(params[obs_index], dtype=torch.float32).to(device)
+    x_star = prepare_x(taus[obs_index][None, :], embedding)[0].to(device)
+
+    # --- Train the NPE -------------------------------------------------------
+    prior = build_prior(device=device)
+    # The histogram bins sit at fixed positions in physical units of tau, but
+    # `sbi` standardises x *before* the embedding -- it builds the conditioning
+    # path as `nn.Sequential(standardizing_net, embedding_net)`. Z-scoring would
+    # therefore hand the bins values they were never meant to see: most of a
+    # trajectory would land outside every bin and be silently dropped.
+    if embedding == "hist" and z_score_x != "none":
+        print(
+            f"embedding='hist' needs the raw time delays: overriding "
+            f"z_score_x='{z_score_x}' with 'none'"
+        )
+        z_score_x = "none"
+
+    embedding_net = build_embedding_net(
+        embedding,
+        embedding_output_dim,
+        hidden_features,
+        hist_nbins,
+        hist_taumax,
+        njumps,
+        cnn_kernel_size,
+    )
+    density_estimator = build_density_estimator(
+        model, hidden_features, num_transforms, embedding_net, prior, z_score_x
+    )
+    trainer, estimator = train_npe(
+        theta_train,
+        x_train,
+        prior,
+        density_estimator,
+        device,
+        training_batch_size,
+        learning_rate,
+        validation_fraction,
+        stop_after_epochs,
+        max_num_epochs,
+    )
+    posterior = trainer.build_posterior(estimator)
+    print(posterior)
+
+    summary: Dict[str, Any] = {
+        "config": {
+            "parameters": PARAMETERS,
+            "num_train": num_train,
+            "num_diagnostic": num_diagnostic,
+            "obs_index": obs_index,
+            "model": model,
+            "embedding": embedding,
+            "hidden_features": hidden_features,
+            "num_transforms": num_transforms,
+            "embedding_output_dim": embedding_output_dim,
+            "hist_nbins": hist_nbins if embedding == "hist" else None,
+            "hist_taumax": hist_taumax if embedding == "hist" else None,
+            "cnn_kernel_size": cnn_kernel_size if embedding == "cnn" else None,
+            "z_score_x": z_score_x,
+            "training_batch_size": training_batch_size,
+            "learning_rate": learning_rate,
+            "max_num_epochs": max_num_epochs,
+            "device": device,
+            "seed": seed,
+        },
+        "training": {
+            "epochs": int(trainer.summary["epochs_trained"][-1]),
+            "best_validation_loss": float(trainer.summary["best_validation_loss"][-1]),
+        },
+    }
+
+    # --- Quick evaluation on a held-out observation --------------------------
+    summary["observation"] = evaluate_observation(
+        posterior, theta_star, x_star, num_posterior_samples, out
+    )
+    print(f"Observation summary: {summary['observation']}")
+
+    # --- Diagnostics ---------------------------------------------------------
+    # A posterior that has not been checked is not a result: always run these.
+    summary["diagnostics"] = run_diagnostics(
+        posterior, theta_diag, x_diag, num_diagnostic_samples, out
+    )
+    print(f"Diagnostics: {summary['diagnostics']}")
+
+    if run_ppc:
+        summary["posterior_predictive"] = posterior_predictive_check(
+            posterior, x_star, num_ppc_simulations, njumps, out, seed=seed
+        )
+        print(f"Posterior predictive check: {summary['posterior_predictive']}")
+
+    # --- Save the trained posterior and the summary --------------------------
+    torch.save(estimator.state_dict(), out / "npe_density_estimator.pt")
+    with open(out / "npe_posterior.pkl", "wb") as f:
+        pickle.dump(posterior, f)
+    with open(out / "summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"Wrote results to {out.resolve()}")
+    return
+
+
+if __name__ == "__main__":
+    fire.Fire(main)

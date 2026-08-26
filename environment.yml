@@ -15,9 +15,11 @@ dependencies:
   - black
   - seaborn
   - pip
+  # The simulation-based inference part of the repository (the notebook
+  # 4-NPE.ipynb and the script npe_2d_sbi.py) needs a newer Python than the
+  # 3.9 pinned above, so it has its own environment in `environment-sbi.yml`.
   - pip:
     - cython==0.29.36
-    - sbi
     - fire
     - ultranest
 
