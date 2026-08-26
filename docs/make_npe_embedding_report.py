@@ -148,11 +148,14 @@ def _calibration_notes(summaries: Dict[str, Dict[str, Any]]) -> str:
     rerun's numbers differ, this paragraph changes with them.
     """
     flagged = []
+    passed = []
     for e in EMBEDDINGS:
         sbc = summaries[e]["diagnostics"]["sbc"]
         bad = [PARAM_LABELS[i] for i, p in enumerate(sbc["ks_pvals"]) if p < 0.05]
         if bad:
             flagged.append(f"`{e}` ({', '.join(bad)})")
+        else:
+            passed.append(f"`{e}`")
     if not flagged:
         return (
             "Every embedding passes the SBC rank-uniformity check (p >= 0.05) "
@@ -168,9 +171,20 @@ def _calibration_notes(summaries: Dict[str, Dict[str, Any]]) -> str:
         ),
         key=lambda t: t[2],
     )
+    if len(flagged) == len(EMBEDDINGS):
+        lead = (
+            "Every run rejects SBC rank-uniformity (p < 0.05) on at least "
+            f"one marginal: {', '.join(flagged)}."
+        )
+    else:
+        lead = (
+            f"{len(flagged)} of {len(EMBEDDINGS)} runs reject SBC "
+            f"rank-uniformity (p < 0.05) on at least one marginal: "
+            f"{', '.join(flagged)}; {', '.join(passed)} pass"
+            f"{'es' if len(passed) == 1 else ''} both parameters."
+        )
     return (
-        "Every run rejects SBC rank-uniformity (p < 0.05) on at least one "
-        f"marginal: {', '.join(flagged)}. TARP -- the joint check that "
+        f"{lead} TARP -- the joint check that "
         "`scripts/npe_2d_sbi.py`'s own docstring calls \"necessary and "
         "sufficient\", unlike the marginal SBC test -- stays clean for all "
         f"four runs (ATC between {min(tarp_atcs):.4f} and "

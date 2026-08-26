@@ -74,7 +74,7 @@ close to 0.
 | `hist` | 0.0404 | 0.0571 | 0.5575 | 0.5580 | 0.0045 | 1.0000 |
 | `cnn` | 0.0036 | 0.4517 | 0.5805 | 0.5615 | 0.0030 | 1.0000 |
 
-Every run rejects SBC rank-uniformity (p < 0.05) on at least one marginal: `none` (Ω), `hist` (Δ), `cnn` (Δ). TARP -- the joint check that `scripts/npe_2d_sbi.py`'s own docstring calls "necessary and sufficient", unlike the marginal SBC test -- stays clean for all four runs (ATC between 0.0013 and 0.0045, KS p-value near 1.0 in every case), so none of these marginal rejections corresponds to a joint-posterior calibration failure severe enough for TARP to catch. The sharpest single rejection is `cnn` on Δ (p=0.0036). By TARP ATC, `deepset` is the
+3 of 4 runs reject SBC rank-uniformity (p < 0.05) on at least one marginal: `none` (Ω), `hist` (Δ), `cnn` (Δ); `deepset` passes both parameters. TARP -- the joint check that `scripts/npe_2d_sbi.py`'s own docstring calls "necessary and sufficient", unlike the marginal SBC test -- stays clean for all four runs (ATC between 0.0013 and 0.0045, KS p-value near 1.0 in every case), so none of these marginal rejections corresponds to a joint-posterior calibration failure severe enough for TARP to catch. The sharpest single rejection is `cnn` on Δ (p=0.0036). By TARP ATC, `deepset` is the
 best-calibrated of the four.
 
 ## Per-embedding figures
