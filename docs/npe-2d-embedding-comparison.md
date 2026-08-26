@@ -29,6 +29,8 @@ alone.
 | `hist` | zuko_nsf | 128 | 3 | nbins=700, taumax=100.0 | none |
 | `cnn` | zuko_nsf | 128 | 3 | kernel_size=5, output_dim=16 | structured |
 
+`hist` shows a different `z_score_x` than the others because its embedding needs the raw, physical-unit time delays -- `scripts/npe_2d_sbi.py` forces `z_score_x="none"` for it automatically (its histogram bin edges are fixed in physical units and would be broken by standardising x first). Every other hyperparameter, including the flow itself, is identical across all four runs.
+
 ## Training outcome
 
 | embedding | epochs trained | best validation loss (lower is better) |
@@ -40,6 +42,8 @@ alone.
 
 Best validation loss (negative log-likelihood on the held-out validation
 split used internally by `NPE.train`) is lowest for `hist`.
+
+All four runs hit the `max_num_epochs` cap rather than stopping early on a validation-loss plateau (`scripts/npe_2d_sbi.py` prints "Maximum number of epochs reached, but network has not yet fully converged" for each). The validation-loss ranking above reflects where training happened to be when the shared epoch budget ran out, not a converged comparison -- treat "best validation loss" as directional, not final.
 
 ## Posterior at a held-out example observation
 
@@ -56,7 +60,7 @@ True (Δ, Ω) = (0.2047, 3.9033)
 | `hist` | 1.2101 | 0.7472 | 3.8638 | 0.0878 |
 | `cnn` | 1.0580 | 0.7010 | 3.8640 | 0.1710 |
 
-Every embedding's posterior mean for Δ overshoots the true value (0.2047) by at least 0.3 at this particular held-out observation, regardless of the embedding used. Since the calibration checks above run on 1,000 *different* held-out pairs, this shared bias looks like a property of this one example rather than a shortcoming of any particular embedding.
+At this single held-out example, every embedding's posterior mean for Δ sits 1.1-1.3 posterior standard deviations above the true value (0.2047) at this one held-out observation -- ordinary single-draw scatter, not a systematic issue; and every embedding's posterior mean for Ω sits 0.2-1.7 posterior standard deviations below the true value (3.9033) at this one held-out observation -- ordinary single-draw scatter, not a systematic issue. The calibration checks above run on 1,000 *different* held-out pairs and are what actually validates each posterior -- this one-example note is provided for context, not as a calibration result.
 
 ## Calibration: SBC, expected coverage and TARP
 
@@ -74,7 +78,7 @@ close to 0.
 | `hist` | 0.0404 | 0.0571 | 0.5575 | 0.5580 | 0.0045 | 1.0000 |
 | `cnn` | 0.0036 | 0.4517 | 0.5805 | 0.5615 | 0.0030 | 1.0000 |
 
-3 of 4 runs reject SBC rank-uniformity (p < 0.05) on at least one marginal: `none` (Ω), `hist` (Δ), `cnn` (Δ); `deepset` passes both parameters. TARP -- the joint check that `scripts/npe_2d_sbi.py`'s own docstring calls "necessary and sufficient", unlike the marginal SBC test -- stays clean for all four runs (ATC between 0.0013 and 0.0045, KS p-value near 1.0 in every case), so none of these marginal rejections corresponds to a joint-posterior calibration failure severe enough for TARP to catch. The sharpest single rejection is `cnn` on Δ (p=0.0036). By TARP ATC, `deepset` is the
+3 of 4 runs reject SBC rank-uniformity (p < 0.05) on at least one marginal: `none` (Ω), `hist` (Δ), `cnn` (Δ); `deepset` passes both parameters. TARP -- the joint check that `scripts/npe_2d_sbi.py`'s own docstring calls "necessary and sufficient", unlike the marginal SBC test -- stays clean for all 4 runs (ATC between 0.0013 and 0.0045, KS p-value at or above 0.05 in every case), so none of these marginal rejections corresponds to a joint-posterior calibration failure severe enough for TARP to catch. The sharpest single marginal rejection is `cnn` on Δ (p=0.0036). By TARP ATC, `deepset` is the
 best-calibrated of the four.
 
 ## Per-embedding figures
@@ -82,29 +86,41 @@ best-calibrated of the four.
 ### `none` — No embedding (raw trajectory)
 
 ![none posterior at the held-out observation](figures/npe-2d-none-posterior-observation.png)
+
 ![none SBC rank histogram](figures/npe-2d-none-sbc-rank-histogram.png)
+
 ![none expected coverage](figures/npe-2d-none-expected-coverage.png)
+
 ![none TARP](figures/npe-2d-none-tarp.png)
 
 ### `deepset` — DeepSets (learned permutation-invariant summary)
 
 ![deepset posterior at the held-out observation](figures/npe-2d-deepset-posterior-observation.png)
+
 ![deepset SBC rank histogram](figures/npe-2d-deepset-sbc-rank-histogram.png)
+
 ![deepset expected coverage](figures/npe-2d-deepset-expected-coverage.png)
+
 ![deepset TARP](figures/npe-2d-deepset-tarp.png)
 
 ### `hist` — Hist-Dense (fixed histogram bins, paper architecture)
 
 ![hist posterior at the held-out observation](figures/npe-2d-hist-posterior-observation.png)
+
 ![hist SBC rank histogram](figures/npe-2d-hist-sbc-rank-histogram.png)
+
 ![hist expected coverage](figures/npe-2d-hist-expected-coverage.png)
+
 ![hist TARP](figures/npe-2d-hist-tarp.png)
 
 ### `cnn` — CNN (1D convolutions, not permutation invariant — control)
 
 ![cnn posterior at the held-out observation](figures/npe-2d-cnn-posterior-observation.png)
+
 ![cnn SBC rank histogram](figures/npe-2d-cnn-sbc-rank-histogram.png)
+
 ![cnn expected coverage](figures/npe-2d-cnn-expected-coverage.png)
+
 ![cnn TARP](figures/npe-2d-cnn-tarp.png)
 
 ## Reproducing

@@ -105,6 +105,28 @@ def _training_table(summaries: Dict[str, Dict[str, Any]]) -> str:
     return header + "\n".join(rows)
 
 
+def _convergence_note(summaries: Dict[str, Dict[str, Any]]) -> str:
+    capped = [
+        e for e in EMBEDDINGS
+        if summaries[e]["training"]["epochs"] >= summaries[e]["config"]["max_num_epochs"]
+    ]
+    if not capped:
+        return ""
+    which = (
+        "All four" if len(capped) == len(EMBEDDINGS)
+        else f"{len(capped)} of {len(EMBEDDINGS)} (" + ", ".join(f"`{e}`" for e in capped) + ")"
+    )
+    return (
+        f"{which} runs hit the `max_num_epochs` cap rather than stopping "
+        "early on a validation-loss plateau (`scripts/npe_2d_sbi.py` prints "
+        '"Maximum number of epochs reached, but network has not yet fully '
+        'converged" for each). The validation-loss ranking above reflects '
+        "where training happened to be when the shared epoch budget ran "
+        "out, not a converged comparison -- treat \"best validation loss\" "
+        "as directional, not final."
+    )
+
+
 def _observation_table(summaries: Dict[str, Dict[str, Any]]) -> str:
     true_theta = summaries["none"]["observation"]["true"]
     header = (
@@ -160,8 +182,9 @@ def _calibration_notes(summaries: Dict[str, Dict[str, Any]]) -> str:
         return (
             "Every embedding passes the SBC rank-uniformity check (p >= 0.05) "
             "on both parameters, consistent with TARP's clean joint result "
-            "below."
+            "above."
         )
+    tarp_ks = [summaries[e]["diagnostics"]["tarp"]["ks_pval"] for e in EMBEDDINGS]
     tarp_atcs = [abs(summaries[e]["diagnostics"]["tarp"]["atc"]) for e in EMBEDDINGS]
     worst = min(
         (
@@ -183,45 +206,73 @@ def _calibration_notes(summaries: Dict[str, Dict[str, Any]]) -> str:
             f"{', '.join(flagged)}; {', '.join(passed)} pass"
             f"{'es' if len(passed) == 1 else ''} both parameters."
         )
+    if all(k >= 0.05 for k in tarp_ks):
+        tarp_sentence = (
+            "TARP -- the joint check that `scripts/npe_2d_sbi.py`'s own "
+            "docstring calls \"necessary and sufficient\", unlike the "
+            f"marginal SBC test -- stays clean for all {len(EMBEDDINGS)} "
+            f"runs (ATC between {min(tarp_atcs):.4f} and "
+            f"{max(tarp_atcs):.4f}, KS p-value at or above 0.05 in every "
+            "case), so none of these marginal rejections corresponds to a "
+            "joint-posterior calibration failure severe enough for TARP to "
+            "catch."
+        )
+    else:
+        failing = [e for e, k in zip(EMBEDDINGS, tarp_ks) if k < 0.05]
+        tarp_sentence = (
+            "TARP -- the joint, \"necessary and sufficient\" check per "
+            "`scripts/npe_2d_sbi.py`'s own docstring -- also rejects for "
+            f"{', '.join(f'`{e}`' for e in failing)}, so at least one of "
+            "these marginal SBC rejections corresponds to a genuine "
+            "joint-posterior calibration problem, not just marginal noise."
+        )
     return (
-        f"{lead} TARP -- the joint check that "
-        "`scripts/npe_2d_sbi.py`'s own docstring calls \"necessary and "
-        "sufficient\", unlike the marginal SBC test -- stays clean for all "
-        f"four runs (ATC between {min(tarp_atcs):.4f} and "
-        f"{max(tarp_atcs):.4f}, KS p-value near 1.0 in every case), so none "
-        "of these marginal rejections corresponds to a joint-posterior "
-        "calibration failure severe enough for TARP to catch. The sharpest "
-        f"single rejection is `{worst[0]}` on {PARAM_LABELS[worst[1]]} "
-        f"(p={worst[2]:.4f})."
+        f"{lead} {tarp_sentence} The sharpest single marginal rejection is "
+        f"`{worst[0]}` on {PARAM_LABELS[worst[1]]} (p={worst[2]:.4f})."
     )
 
 
 def _observation_bias_note(summaries: Dict[str, Dict[str, Any]]) -> str:
-    """Flags it, from the data, if every embedding's posterior mean misses
-    the true value of one parameter in the same direction by a wide margin
-    at the single example observation -- a sign the observation itself is
-    the hard part, not any one embedding, since the calibration checks above
-    already covered many *different* held-out pairs.
+    """Reports how far each embedding's posterior mean at the single held-out
+    example sits from the truth, in posterior standard deviations rather than
+    raw units (a small absolute offset can be many sigma in a tight posterior,
+    and a large one unremarkable in a wide one) -- and says plainly when that
+    offset is ordinary single-draw scatter (|z| < 2) rather than a real
+    discrepancy, since this is one example, not the calibration check.
     """
     true_theta = summaries["none"]["observation"]["true"]
+    notes = []
     for i, label in enumerate(PARAM_LABELS):
-        deltas = [
-            summaries[e]["observation"]["posterior_mean"][i] - true_theta[i]
+        zs = [
+            (summaries[e]["observation"]["posterior_mean"][i] - true_theta[i])
+            / summaries[e]["observation"]["posterior_std"][i]
             for e in EMBEDDINGS
         ]
-        if all(d > 0.3 for d in deltas) or all(d < -0.3 for d in deltas):
-            direction = "overshoots" if deltas[0] > 0 else "undershoots"
-            num_diagnostic = summaries["none"]["config"]["num_diagnostic"]
-            return (
-                f"Every embedding's posterior mean for {label} {direction} "
-                f"the true value ({true_theta[i]:.4f}) by at least 0.3 at "
-                "this particular held-out observation, regardless of the "
-                f"embedding used. Since the calibration checks above run on "
-                f"{num_diagnostic:,} *different* held-out pairs, this shared "
-                "bias looks like a property of this one example rather than "
-                "a shortcoming of any particular embedding."
-            )
-    return ""
+        same_direction = all(z > 0 for z in zs) or all(z < 0 for z in zs)
+        if not same_direction:
+            continue
+        direction = "above" if zs[0] > 0 else "below"
+        severity = (
+            "notable" if all(abs(z) > 2.0 for z in zs)
+            else "ordinary single-draw scatter, not a systematic issue"
+        )
+        notes.append(
+            f"every embedding's posterior mean for {label} sits "
+            f"{min(abs(z) for z in zs):.1f}-{max(abs(z) for z in zs):.1f} "
+            f"posterior standard deviations {direction} the true value "
+            f"({true_theta[i]:.4f}) at this one held-out observation -- "
+            f"{severity}"
+        )
+    if not notes:
+        return ""
+    num_diagnostic = summaries["none"]["config"]["num_diagnostic"]
+    return (
+        "At this single held-out example, " + "; and ".join(notes) + ". "
+        f"The calibration checks above run on {num_diagnostic:,} *different* "
+        "held-out pairs and are what actually validates each posterior -- "
+        "this one-example note is provided for context, not as a "
+        "calibration result."
+    )
 
 
 def _best_by_tarp_atc(summaries: Dict[str, Dict[str, Any]]) -> str:
@@ -230,6 +281,24 @@ def _best_by_tarp_atc(summaries: Dict[str, Dict[str, Any]]) -> str:
 
 def _best_by_validation_loss(summaries: Dict[str, Dict[str, Any]]) -> str:
     return min(EMBEDDINGS, key=lambda e: summaries[e]["training"]["best_validation_loss"])
+
+
+def _zscore_footnote(summaries: Dict[str, Dict[str, Any]]) -> str:
+    overridden = [
+        e for e in EMBEDDINGS
+        if summaries[e]["config"]["z_score_x"] != summaries[EMBEDDINGS[0]]["config"]["z_score_x"]
+    ]
+    if not overridden:
+        return ""
+    return (
+        f"`{'`, `'.join(overridden)}` shows a different `z_score_x` than the "
+        "others because its embedding needs the raw, physical-unit time "
+        'delays -- `scripts/npe_2d_sbi.py` forces `z_score_x="none"` for '
+        "it automatically (its histogram bin edges are fixed in physical "
+        "units and would be broken by standardising x first). Every other "
+        "hyperparameter, including the flow itself, is identical across "
+        "all four runs."
+    )
 
 
 def main(
@@ -251,7 +320,7 @@ def main(
 
     num_train = summaries["none"]["config"]["num_train"]
     num_diagnostic = summaries["none"]["config"]["num_diagnostic"]
-    total = num_train + 200_000  # the held-out pool is 5% of the total by construction
+    total = round(num_train / 0.95)  # num_train is 95% of the total by construction
     best_loss = _best_by_validation_loss(summaries)
     best_tarp = _best_by_tarp_atc(summaries)
 
@@ -281,12 +350,16 @@ alone.
 
 {_config_table(summaries)}
 
+{_zscore_footnote(summaries)}
+
 ## Training outcome
 
 {_training_table(summaries)}
 
 Best validation loss (negative log-likelihood on the held-out validation
 split used internally by `NPE.train`) is lowest for `{best_loss}`.
+
+{_convergence_note(summaries)}
 
 ## Posterior at a held-out example observation
 
@@ -319,8 +392,11 @@ best-calibrated of the four.
         report += f"""### `{e}` — {EMBEDDING_LABEL[e]}
 
 ![{e} posterior at the held-out observation](figures/npe-2d-{e}-posterior-observation.png)
+
 ![{e} SBC rank histogram](figures/npe-2d-{e}-sbc-rank-histogram.png)
+
 ![{e} expected coverage](figures/npe-2d-{e}-expected-coverage.png)
+
 ![{e} TARP](figures/npe-2d-{e}-tarp.png)
 
 """
